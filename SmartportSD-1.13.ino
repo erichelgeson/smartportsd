@@ -46,7 +46,7 @@
 //
 //*****************************************************************************
 
-#include <SPI.h>
+//x #include <SPI.h>
 #include "SdFat.h"
 //#include <EEPROM.h>
 
@@ -82,12 +82,13 @@ extern "C" unsigned char ReceivePacket(unsigned char*); //Receive smartport pack
 extern "C" unsigned char SendPacket(unsigned char*);    //send smartport packet assembler function
 
 //unsigned char packet_buffer[768];   //smartport packet buffer
-unsigned char packet_buffer[768];   //smartport packet buffer
+unsigned char packet_buffer[605];   //smartport packet buffer
 //unsigned char sector_buffer[512];   //ata sector data buffer
 unsigned char status, packet_byte;
 int count;
 int initPartition;
 unsigned char device_id[NUM_PARTITIONS];     //to hold assigned device id's for the partitions
+
 
 //The circuit:
 //    SD card attached to SPI bus as follows:
@@ -138,31 +139,50 @@ SdFat sdcard;
 // Name the SD object different from the above "sd"
 // so that if we acciedntally use "sd" anywhere the
 // compiler will catch it
-SdBaseFile sdf;
+//SdBaseFile sdf;
 //todo: dynamic(?) array of files selected by user
 //File partition1;
+
+File sdf[4];
+
 
 //------------------------------------------------------------------------------
 
 void setup() {
+  //sdf[0] = &sdf1;
+  //sdf[1] = &sdf2;
   // put your setup code here, to run once:
   mcuInit();
   Serial.begin(9600);
-  Serial.print("\r\nSmartportSD v1.14a\r\n");
+  Serial.print(F("\r\nSmartportSD v1.14a\r\n"));
 //  initPartition = EEPROM.read(0);
   initPartition=0;
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
-  //Serial.print("\r\nBoot partition: ");
+  //Serial.print(F("\r\nBoot partition: "));
   //Serial.print(initPartition, DEC);
 
   pinMode(ejectPin, INPUT);
   print_hd_info(); //bad! something that prints things shouldn't do essential setup
   // TODO: handle file IO errors
 
-  if(!sdf.open("PART1.PO", O_RDWR)){
-    Serial.print("\r\nImage open error!");
-  }
+  Serial.print(F("\r\nFree memory before opening images: "));
+  Serial.print(freeMemory());
+
+  String part = "PART";
+  
+  for(unsigned char i=0; i<NUM_PARTITIONS; i++){
+    sdf[i] = sdcard.open((part+(i+1)+".PO"), O_RDWR);
+    if(!sdf[i].isOpen()){
+      Serial.print("\r\nImage ");
+      Serial.print(i, DEC);
+      Serial.print(" open error!");
+    }
+    Serial.print("\r\nFree memory after opening image ");
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.print(freeMemory(), DEC);
+  }  
 
 }
 
@@ -186,7 +206,7 @@ void loop() {
   int count;
   bool sdstato;
   unsigned char source, status, phases, status_code;
-  //Serial.print("\r\nloop");
+  //Serial.print(F("\r\nloop"));
 
   DDRD = 0x00;
 
@@ -209,7 +229,7 @@ void loop() {
       // ph3=0 ph2=1 ph1=0 ph0=1
 
       case 0x05:
-        Serial.print("\r\nReset\r\n");
+        Serial.print(F("\r\nReset\r\n"));
 
         //Serial.print(number_partitions_initialised);
         // monitor phase lines for reset to clear
@@ -226,7 +246,7 @@ void loop() {
       case 0x0b:
       case 0x0e:
       case 0x0f:
-        //Serial.print(("E ")); //this is timing sensitive, so can't print to much here as it takes to long
+        //Serial.print(F(("E "))); //this is timing sensitive, so can't print to much here as it takes to long
         noInterrupts();
         DDRC = 0xFF;   //set ack to output, sp bus is enabled
         if ((status = ReceivePacket( (unsigned char*) packet_buffer))) {
@@ -262,23 +282,23 @@ void loop() {
               case 0x83:  //is a format cmd
               case 0x81:  //is a readblock cmd
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(("A ") );
+                //Serial.print(F("A ")) );
                 while (PINC & 0x20);      //wait till low
-                //Serial.print(("a ") );
+                //Serial.print(F(("a ")) );
                 while (!(PINC & 0x20));  //wait till high
-                //Serial.print(("A\r\n") );
+                //Serial.print(F(("A\r\n")) );
                 break;
               case 0x82:  //is a writeblock cmd
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(("W ") );
+                //Serial.print(F(("W ")) );
                 while (PINC & 0x20);      //wait till low
-                //Serial.print(("w ") );
+                //Serial.print(F(("w ")) );
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(("W\r\n") );
+                //Serial.print(F("W\r\n")) );
                 while (PINC & 0x20);      //wait till low
-                //Serial.print(("w ") );
+                //Serial.print(F(("w ")) );
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(("W\r\n") );
+                //Serial.print(F("W\r\n") );
                 break;
             }
             break;  //not one of ours
@@ -289,7 +309,7 @@ void loop() {
         PORTC &= ~(_BV(5));   //set ack low
         while (PIND & 0x04);   //wait for req to go low
         //assume its a cmd packet, cmd code is in byte 14
-        //Serial.print("\r\nCMD:");
+        //Serial.print(F("\r\nCMD:"));
         //Serial.print(packet_buffer[14],HEX);
         //print_packet ((unsigned char*) packet_buffer,packet_length());
 
@@ -314,7 +334,7 @@ void loop() {
                 interrupts();
                 //printf_P(PSTR("\r\nSent Packet Data\r\n") );
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
-                //Serial.print("\r\nStatus CMD");
+                //Serial.print(F("\r\nStatus CMD"));
                 digitalWrite(statusledPin, LOW);
               }
             }
@@ -341,27 +361,27 @@ void loop() {
                 // block_num = block_num + (((partition + initPartition) % 4) * 65536);
 
                 digitalWrite(statusledPin, HIGH);
-                /*Serial.print("\r\nID: ");
+                /*Serial.print(F("\r\nID: "));
                 Serial.print(source);
-                Serial.print("Read Block: ");
+                Serial.print(F("Read Block: "));
                 Serial.print(block_num);*/
 
-                if (!sdf.seekSet(block_num*512)){
-                  Serial.print("\r\nRead err!");
+                if (!sdf[partition].seekSet(block_num*512)){
+                  Serial.print(F("\r\nRead err!"));
                 }
                 
-                sdstato = sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
+                sdstato = sdf[partition].read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
-                  Serial.print("\r\nRead err!");
+                  Serial.print(F("\r\nRead err!"));
                 }
                 encode_data_packet(source);
-                //Serial.print(("\r\nPrepared data packet before Sending\r\n") );
+                //Serial.print(F("\r\nPrepared data packet before Sending\r\n") );
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                //if (status == 1)Serial.print("\r\nSent err.");
+                //if (status == 1)Serial.print(F("\r\nSent err."));
                 digitalWrite(statusledPin, LOW);
 
                 //Serial.print(status);
@@ -395,17 +415,17 @@ void loop() {
                 status = decode_data_packet();
                 if (status == 0) { //ok
                   //write block to CF card
-                  //Serial.print("\r\nWrite Bl. n.r: ");
+                  //Serial.print(F("\r\nWrite Bl. n.r: "));
                   //Serial.print(block_num);
                   digitalWrite(statusledPin, HIGH);
                   // TODO: add file object lookup
-                  if (!sdf.seekSet(block_num*512)){
-                    Serial.print("\r\nWrite err!");
+                  if (!sdf[partition].seekSet(block_num*512)){
+                    Serial.print(F("\r\nWrite err!"));
                   }
-                  sdstato = sdf.write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
+                  sdstato = sdf[partition].write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
                   if (!sdstato) {
-                    Serial.print("\r\nWrite err!");
-                    //Serial.print(" Block n.:");
+                    Serial.print(F("\r\nWrite err!"));
+                    //Serial.print(F(" Block n.:"));
                     //Serial.print(block_num);
                     status = 6;
                   }
@@ -417,7 +437,7 @@ void loop() {
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                //Serial.print(("\r\nSent status Packet Data\r\n") );
+                //Serial.print(F("\r\nSent status Packet Data\r\n") );
                 //print_packet ((unsigned char*) sector_buffer,512);
 
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
@@ -437,7 +457,7 @@ void loop() {
                 status = SendPacket( (unsigned char*) packet_buffer);
                 interrupts();
                 DDRD = 0x00; //set rd back to input so back to tristate
-                //Serial.print(("\r\nFormattato!!!\r\n") );
+                //Serial.print(F("\r\nFormattato!!!\r\n") );
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
               }
             }
@@ -471,7 +491,7 @@ void loop() {
 
             if (number_partitions_initialised - 1 == NUM_PARTITIONS) {
               for (partition = 0; partition < 4; partition++) {
-                Serial.print("\r\nDrive: ");
+                Serial.print(F("\r\nDrive: "));
                 Serial.print(device_id[partition], HEX);
               }
             }
@@ -832,9 +852,9 @@ int verify_cmdpkt_checksum(void)
   evenbits = packet_buffer[length - 3];
   pkt_checksum = oddbits | evenbits;
 
-  //  Serial.print("Pkt Chksum Byte:\r\n");
+  //  Serial.print(F("Pkt Chksum Byte:\r\n"));
   //  Serial.print(pkt_checksum,DEC);
-  //  Serial.print("Calc Chksum Byte:\r\n");
+  //  Serial.print(F("Calc Chksum Byte:\r\n"));
   //  Serial.print(calc_checksum,DEC);
 
   if ( pkt_checksum == calc_checksum )
@@ -858,19 +878,19 @@ void print_packet (unsigned char* data, int bytes)
   char he2[2];
   char xx;
 
-  Serial.print(("\r\n"));
+  Serial.print(F("\r\n"));
   for (count = 0; count < bytes; count = count + 16) {
-    sprintf(tbs, "%04X: ", count);
+    sprintf(tbs, ("%04X: "), count);
     Serial.print(tbs);
     for (row = 0; row < 16; row++) {
       if (count + row >= bytes)
-        Serial.print(("   "));
+        Serial.print(F("   "));
       else {
         sprintf(he2, "%02X ", data[count + row]);
         Serial.print(he2);
       }
     }
-    Serial.print("-");
+    Serial.print(F("-"));
     for (row = 0; row < 16; row++) {
       if ((data[count + row] > 31) && (count + row < bytes) && (data[count + row] < 129))
       {
@@ -878,9 +898,9 @@ void print_packet (unsigned char* data, int bytes)
         Serial.print(xx);
       }
       else
-        Serial.print(("."));
+        Serial.print(F("."));
     }
-    Serial.print(("\r\n"));
+    Serial.print(F("\r\n"));
   }
 }
 
@@ -915,7 +935,7 @@ void print_hd_info(void)
 
 
   if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)){
-    Serial.print("\r\nError init card");
+    Serial.print(F("\r\nError init card"));
     led_err();
   } else {
     digitalWrite(statusledPin, HIGH);
@@ -926,7 +946,7 @@ void print_hd_info(void)
   
 /* #if USE_SDIO // Deprecated because I don't want to maintain two code paths
   if (!sd.begin()) {
-    Serial.print("\r\nError init card");
+    Serial.print(F("\r\nError init card"));
     led_err();
   } else {
     digitalWrite(statusledPin, HIGH);
@@ -936,7 +956,7 @@ void print_hd_info(void)
   }
 #else  // USE_SDIO
   if (!sd.init(SPI_HALF_SPEED, chipSelect)) {
-    Serial.print("Error card");
+    Serial.print(F("Error card"));
     led_err();
   }  else {
     digitalWrite(statusledPin, HIGH);
@@ -959,10 +979,10 @@ void print_hd_info(void)
 int rotate_boot (void)
 {
   initPartition = initPartition++;
-  Serial.print("\r\nBoot uno: ");
+  Serial.print(F("\r\nBoot uno: "));
   Serial.print(initPartition, DEC);
   initPartition = initPartition + 1;
-  Serial.print("\r\nBoot due: ");
+  Serial.print(F("\r\nBoot due: "));
   Serial.print(initPartition, DEC);
 
   initPartition = initPartition % 4;
@@ -987,7 +1007,7 @@ void led_err(void)
 {
   int i = 0;
   interrupts();
-  Serial.print("\r\nError!");
+  Serial.print(F("\r\nError!"));
   pinMode(statusledPin, OUTPUT);
 
   for (i = 0; i < 5; i++) {
@@ -1098,4 +1118,25 @@ void mcuInit(void)
   ACSR = 0x80;
   //  SFIOR=0x00;
   //noInterrupts();
+}
+
+    #ifdef __arm__
+    // should use uinstd.h to define sbrk but Due causes a conflict
+    extern "C" char* sbrk(int incr);
+    #else  // __ARM__
+    extern char *__brkval;
+    #endif  // __arm__
+     
+int freeMemory() {
+  extern int __bss_end;
+  //extern int *__brkval;
+  int free_memory;
+  if ((int)__brkval == 0) {
+    // if no heap use from end of bss section
+    free_memory = ((int)&free_memory) - ((int)&__bss_end);
+  } else {
+    // use from top of stack to heap
+    free_memory = ((int)&free_memory) - ((int)__brkval);
+  }
+  return free_memory;
 }
