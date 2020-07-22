@@ -47,11 +47,13 @@
 //*****************************************************************************
 
 #include <SPI.h>
-#include "Sd2Card.h"
-#include <EEPROM.h>
+#include "SdFat.h"
+//#include <EEPROM.h>
 
 // Set USE_SDIO to zero for SPI card access.
-#define USE_SDIO 0
+// Deprecated maintly because I don't want to
+// maintain two codepaths
+// #define USE_SDIO 0
 
 #include <avr/io.h>
 #include <string.h>
@@ -81,7 +83,7 @@ extern "C" unsigned char SendPacket(unsigned char*);    //send smartport packet 
 
 //unsigned char packet_buffer[768];   //smartport packet buffer
 unsigned char packet_buffer[768];   //smartport packet buffer
-unsigned char sector_buffer[512];   //ata sector data buffer
+//unsigned char sector_buffer[512];   //ata sector data buffer
 unsigned char status, packet_byte;
 int count;
 int initPartition;
@@ -105,6 +107,7 @@ const uint8_t chipSelect = 10;
 const uint8_t ejectPin = 17;
 const uint8_t statusledPin = 18;
 
+// Don't actually use this, deprecated for simplicity
 // Set USE_SDIO to zero for SPI card access.
 //
 // Initialize at highest supported speed not over 50 MHz.
@@ -120,6 +123,7 @@ const int8_t DISABLE_CHIP_SELECT = 0;  // -1
 // Pin numbers in templates must be constants.
 
 
+/* Deprecated because I don't want to maintain two code paths
 #if USE_SDIO
 // Use faster SdioCardEX
 SdioCardEX sd;
@@ -127,6 +131,16 @@ SdioCardEX sd;
 #else  // USE_SDIO
 Sd2Card sd;
 #endif  // USE_SDIO
+*/
+
+
+SdFat sdcard;
+// Name the SD object different from the above "sd"
+// so that if we acciedntally use "sd" anywhere the
+// compiler will catch it
+SdBaseFile sdf;
+//todo: dynamic(?) array of files selected by user
+//File partition1;
 
 //------------------------------------------------------------------------------
 
@@ -134,15 +148,21 @@ void setup() {
   // put your setup code here, to run once:
   mcuInit();
   Serial.begin(9600);
-  Serial.print("\r\nSmartportSD v1.12\r\n");
-  initPartition = EEPROM.read(0);
+  Serial.print("\r\nSmartportSD v1.14a\r\n");
+//  initPartition = EEPROM.read(0);
+  initPartition=0;
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
-  Serial.print("\r\nBoot partition: ");
-  Serial.print(initPartition, DEC);
+  //Serial.print("\r\nBoot partition: ");
+  //Serial.print(initPartition, DEC);
 
   pinMode(ejectPin, INPUT);
-  print_hd_info();
+  print_hd_info(); //bad! something that prints things shouldn't do essential setup
+  // TODO: handle file IO errors
+
+  if(!sdf.open("PART1.PO", O_RDWR)){
+    Serial.print("\r\nImage open error!");
+  }
 
 }
 
@@ -232,7 +252,7 @@ void loop() {
             PORTC &= ~(_BV(5));   //set ack low, for next time its an output
             while (PINC & 0x20);  //wait till low other dev has finished receiving it
             //printf_P(PSTR("a ") );
-            print_packet ((unsigned char*) packet_buffer, packet_length());
+            //print_packet ((unsigned char*) packet_buffer, packet_length());
 
 
             //assume its a cmd packet, cmd code is in byte 14
@@ -292,7 +312,7 @@ void loop() {
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                printf_P(PSTR("\r\nSent Packet Data\r\n") );
+                //printf_P(PSTR("\r\nSent Packet Data\r\n") );
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
                 //Serial.print("\r\nStatus CMD");
                 digitalWrite(statusledPin, LOW);
@@ -317,17 +337,22 @@ void loop() {
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = block_num + (((LBL & 0x7f) | (((unsigned short)LBH << 4) & 0x80)) * 256);
                 // partition number indicates which 32mb block we access on the CF
-                block_num = block_num + (((partition + initPartition) % 4) * 65536);
+                // TODO: lookup which file to read from
+                // block_num = block_num + (((partition + initPartition) % 4) * 65536);
 
                 digitalWrite(statusledPin, HIGH);
                 /*Serial.print("\r\nID: ");
                 Serial.print(source);
                 Serial.print("Read Block: ");
                 Serial.print(block_num);*/
+
+                if (!sdf.seekSet(block_num*512)){
+                  Serial.print("\r\nRead err!");
+                }
                 
-                sdstato = sd.readBlock(block_num, (unsigned char*) sector_buffer);    //Reading block from SD Card
+                sdstato = sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
-                  Serial.print("\r\nRead Err.");
+                  Serial.print("\r\nRead err!");
                 }
                 encode_data_packet(source);
                 //Serial.print(("\r\nPrepared data packet before Sending\r\n") );
@@ -336,7 +361,7 @@ void loop() {
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                if (status == 1)Serial.print("\r\nSent err.");
+                //if (status == 1)Serial.print("\r\nSent err.");
                 digitalWrite(statusledPin, LOW);
 
                 //Serial.print(status);
@@ -365,18 +390,23 @@ void loop() {
                 PORTC &= ~(_BV(5));   //set ack low
                 while (PIND & 0x04);   //wait for req to go low
                 // partition number indicates which 32mb block we access on the CF
-                block_num = block_num + (((partition + initPartition) % 4) * 65536);
+                // TODO: replace this with a lookup to get file object from partition number
+                // block_num = block_num + (((partition + initPartition) % 4) * 65536);
                 status = decode_data_packet();
                 if (status == 0) { //ok
                   //write block to CF card
                   //Serial.print("\r\nWrite Bl. n.r: ");
                   //Serial.print(block_num);
                   digitalWrite(statusledPin, HIGH);
-                  sdstato = sd.writeBlock(block_num, (unsigned char*) sector_buffer);   //Write block to SD Card
+                  // TODO: add file object lookup
+                  if (!sdf.seekSet(block_num*512)){
+                    Serial.print("\r\nWrite err!");
+                  }
+                  sdstato = sdf.write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
                   if (!sdstato) {
-                    Serial.print("\r\nWrite Err.");
-                    Serial.print(" Block n.:");
-                    Serial.print(block_num);
+                    Serial.print("\r\nWrite err!");
+                    //Serial.print(" Block n.:");
+                    //Serial.print(block_num);
                     status = 6;
                   }
                 }
@@ -457,13 +487,43 @@ void loop() {
 // Returns: none
 //
 // Description: encode 512 byte data packet for read block command from host
-// requires the data to be in the sector buffer, and builds the smartport
-// packet into the packet buffer
+// requires the data to be in the packet buffer, and builds the smartport
+// packet IN PLACE in the packet buffer
 //*****************************************************************************
 void encode_data_packet (unsigned char source)
 {
   int grpbyte, grpcount;
   unsigned char checksum = 0, grpmsb;
+  unsigned char group_buffer[7];
+
+  // Calculate checksum of sector bytes before we destroy them
+    for (count = 0; count < 512; count++) // xor all the data bytes
+    checksum = checksum ^ packet_buffer[count];
+
+  // Start assembling the packet at the rear and work 
+  // your way to the front so we don't overwrite data
+  // we haven't encoded yet
+
+  //grps of 7
+  for (grpcount = 72; grpcount >= 0; grpcount--) //73
+  {
+    memcpy(group_buffer, packet_buffer + 1 + (grpcount * 7), 7);
+    // add group msb byte
+    grpmsb = 0;
+    for (grpbyte = 0; grpbyte < 7; grpbyte++)
+      grpmsb = grpmsb | ((group_buffer[grpbyte] >> (grpbyte + 1)) & (0x80 >> (grpbyte + 1)));
+    packet_buffer[16 + (grpcount * 8)] = grpmsb | 0x80; // set msb to one
+
+    // now add the group data bytes bits 6-0
+    for (grpbyte = 0; grpbyte < 7; grpbyte++)
+      packet_buffer[17 + (grpcount * 8) + grpbyte] = group_buffer[grpbyte] | 0x80;
+
+  }
+  
+  //total number of packet data bytes for 512 data bytes is 584
+  //odd byte
+  packet_buffer[14] = ((packet_buffer[0] >> 1) & 0x40) | 0x80;
+  packet_buffer[15] = packet_buffer[0] | 0x80;
 
   packet_buffer[0] = 0xff;  //sync bytes
   packet_buffer[1] = 0x3f;
@@ -481,28 +541,9 @@ void encode_data_packet (unsigned char source)
   packet_buffer[12] = 0x81; //ODDCNT  - 1 odd byte for 512 byte packet
   packet_buffer[13] = 0xC9; //GRP7CNT - 73 groups of 7 bytes for 512 byte packet
 
-  //total number of packet data bytes for 512 data bytes is 584
-  //odd byte
-  packet_buffer[14] = ((sector_buffer[0] >> 1) & 0x40) | 0x80;
-  packet_buffer[15] = sector_buffer[0] | 0x80;
 
-  //grps of 7
-  for (grpcount = 0; grpcount < 73; grpcount++) //73
-  {
-    // add group msb byte
-    grpmsb = 0;
-    for (grpbyte = 0; grpbyte < 7; grpbyte++)
-      grpmsb = grpmsb | ((sector_buffer[1 + (grpcount * 7) + grpbyte] >> (grpbyte + 1)) & (0x80 >> (grpbyte + 1)));
-    packet_buffer[16 + (grpcount * 8)] = grpmsb | 0x80; // set msb to one
 
-    // now add the group data bytes bits 6-0
-    for (grpbyte = 0; grpbyte < 7; grpbyte++)
-      packet_buffer[17 + (grpcount * 8) + grpbyte] = sector_buffer[1 + (grpcount * 7) + grpbyte] | 0x80;
 
-  }
-  //add checksum
-  for (count = 0; count < 512; count++) // xor all the data bytes
-    checksum = checksum ^ sector_buffer[count];
   for (count = 7; count < 14; count++) // now xor the packet header bytes
     checksum = checksum ^ packet_buffer[count];
   packet_buffer[600] = checksum | 0xaa;      // 1 c6 1 c4 1 c2 1 c0
@@ -520,34 +561,39 @@ void encode_data_packet (unsigned char source)
 // Returns: error code, >0 = error encountered
 //
 // Description: decode 512 byte data packet for write block command from host
-// decodes the data from the packet_buffer into the sector_buffer
+// decodes the data from the packet_buffer IN-PLACE!
 //*****************************************************************************
 int decode_data_packet (void)
 {
   int grpbyte, grpcount;
   unsigned char checksum = 0, bit0to6, bit7, oddbits, evenbits;
+  unsigned char group_buffer[8];
+
+  // First, checksum  packet header, because we're about to destroy it
+  for (count = 6; count < 13; count++) // now xor the packet header bytes
+  checksum = checksum ^ packet_buffer[count];
+
+  evenbits = packet_buffer[599] & 0x55;
+  oddbits = (packet_buffer[600] & 0x55 ) << 1;
 
   //add oddbyte, 1 in a 512 data packet
-  sector_buffer[0] = ((packet_buffer[13] << 1) & 0x80) | (packet_buffer[14] & 0x7f);
+  packet_buffer[0] = ((packet_buffer[13] << 1) & 0x80) | (packet_buffer[14] & 0x7f);
 
   // 73 grps of 7 in a 512 byte packet
   for (grpcount = 0; grpcount < 73; grpcount++)
   {
+    memcpy(group_buffer, packet_buffer + 15 + (grpcount * 8), 8);
     for (grpbyte = 0; grpbyte < 7; grpbyte++) {
-      bit7 = (packet_buffer[15 + (grpcount * 8)] << (grpbyte + 1)) & 0x80;
-      bit0to6 = (packet_buffer[16 + (grpcount * 8) + grpbyte]) & 0x7f;
-      sector_buffer[1 + (grpcount * 7) + grpbyte] = bit7 | bit0to6;
+      bit7 = (group_buffer[0] << (grpbyte + 1)) & 0x80;
+      bit0to6 = (group_buffer[grpbyte + 1]) & 0x7f;
+      packet_buffer[1 + (grpcount * 7) + grpbyte] = bit7 | bit0to6;
     }
   }
 
   //verify checksum
   for (count = 0; count < 512; count++) // xor all the data bytes
-    checksum = checksum ^ sector_buffer[count];
-  for (count = 6; count < 13; count++) // now xor the packet header bytes
     checksum = checksum ^ packet_buffer[count];
 
-  evenbits = packet_buffer[599] & 0x55;
-  oddbits = (packet_buffer[600] & 0x55 ) << 1;
   if (checksum == (oddbits | evenbits))
     return 0; //noerror
   else
@@ -864,9 +910,21 @@ int packet_length (void)
 void print_hd_info(void)
 {
   int i = 0;
-  Serial.print("\r\nCard init");
+  //Serial.print("\r\nCard init");
   // use uppercase in hex and use 0X base prefix
-#if USE_SDIO
+
+
+  if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)){
+    Serial.print("\r\nError init card");
+    led_err();
+  } else {
+    digitalWrite(statusledPin, HIGH);
+    delay(5000);
+    digitalWrite(statusledPin, LOW);
+    delay(1000);
+  }
+  
+/* #if USE_SDIO // Deprecated because I don't want to maintain two code paths
   if (!sd.begin()) {
     Serial.print("\r\nError init card");
     led_err();
@@ -886,7 +944,7 @@ void print_hd_info(void)
     digitalWrite(statusledPin, LOW);
     delay(1000);
   }
-#endif
+#endif */
 
 }
 
@@ -908,7 +966,7 @@ int rotate_boot (void)
   Serial.print(initPartition, DEC);
 
   initPartition = initPartition % 4;
-  EEPROM.write(0, initPartition);
+//  EEPROM.write(0, initPartition);
   digitalWrite(statusledPin, HIGH);
   Serial.print("\r\nBoot partition: ");
   Serial.print(initPartition, DEC);
