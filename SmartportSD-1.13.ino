@@ -24,6 +24,8 @@
 // 1.13 - Fixed an issue where the block number was calculated incorrectly, leading to
 //        failed operations. Now Total Replay v3 works!
 //
+// 1.14 - Now uses FAT filesystem on the SD card instead of raw layout.
+//
 // Apple disk interface is connected as follows:
 // wrprot = pa5 (ack) (output)
 // ph0    = pd2 (req) (input)
@@ -77,6 +79,7 @@ void encode_status_reply_packet (unsigned char source);
 void print_packet (unsigned char* data, int bytes);
 int  packet_length (void);
 int partition;
+bool is_valid_image(File imageFile);
 
 extern "C" unsigned char ReceivePacket(unsigned char*); //Receive smartport packet assembler function
 extern "C" unsigned char SendPacket(unsigned char*);    //send smartport packet assembler function
@@ -164,7 +167,6 @@ void setup() {
 
   pinMode(ejectPin, INPUT);
   print_hd_info(); //bad! something that prints things shouldn't do essential setup
-  // TODO: handle file IO errors
 
   Serial.print(F("\r\nFree memory before opening images: "));
   Serial.print(freeMemory());
@@ -174,13 +176,17 @@ void setup() {
   for(unsigned char i=0; i<NUM_PARTITIONS; i++){
     sdf[i] = sdcard.open((part+(i+1)+".PO"), O_RDWR);
     if(!sdf[i].isOpen()){
-      Serial.print("\r\nImage ");
+      Serial.print(F("\r\nImage "));
       Serial.print(i, DEC);
-      Serial.print(" open error!");
+      Serial.print(F(" open error!"));
     }
-    Serial.print("\r\nFree memory after opening image ");
+    if(!is_valid_image(sdf[i])){
+      Serial.print(F("\r\nBad image file!"));
+      sdf[i].close();
+    }
+    Serial.print(F("\r\nFree memory after opening image "));
     Serial.print(i);
-    Serial.print(": ");
+    Serial.print(F(": "));
     Serial.print(freeMemory(), DEC);
   }  
 
@@ -1139,4 +1145,27 @@ int freeMemory() {
     free_memory = ((int)&free_memory) - ((int)__brkval);
   }
   return free_memory;
+}
+
+
+// TODO: Allow image files with headers, too
+bool is_valid_image(File imageFile){
+
+  Serial.print(F("\r\nTesting file "));
+  imageFile.printName();
+  if(!imageFile.isOpen()||!imageFile.isFile()){
+    Serial.print(F("\r\nFile must exist, be open and be a regular "));
+    Serial.print(F("file before checking for valid image type!"));
+    return false;
+  }
+
+  if(imageFile.size() != (imageFile.size()>>9)<<9||imageFile.size()==0){
+    Serial.print(F("\r\nFile must be an unadorned ProDOS order image with no header!"));
+    Serial.print(F("\r\nThis means its size must be an exact multiple of 512!"));
+    return false;
+  }
+
+  Serial.print(F("\r\nFile good!"));
+  return true;
+  
 }
