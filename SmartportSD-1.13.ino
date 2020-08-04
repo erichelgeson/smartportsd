@@ -67,7 +67,7 @@
 #define PORT_ACK    PORTC   // Define the PORT to ACK
 #define PIN_ACK     5     // Define the PIN number to ACK
 
-#define NUM_PARTITIONS  4          // Number of 32MB Prodos partions supported
+#define NUM_PARTITIONS  1          // Number of 32MB Prodos partions supported
 
 
 void print_hd_info(void);
@@ -75,8 +75,7 @@ void encode_data_packet (unsigned char source);   //encode smartport 512 byte da
 int  decode_data_packet (void);                   //decode smartport 512 byte data packet
 void encode_write_status_packet(unsigned char source, unsigned char status);
 void encode_init_reply_packet (unsigned char source, unsigned char status);
-void encode_status_reply_packet (unsigned char source);
-void print_packet (unsigned char* data, int bytes);
+void encode_status_reply_packet (struct device d);
 int  packet_length (void);
 int partition;
 bool is_valid_image(File imageFile);
@@ -90,7 +89,18 @@ unsigned char packet_buffer[605];   //smartport packet buffer
 unsigned char status, packet_byte;
 int count;
 int initPartition;
-unsigned char device_id[NUM_PARTITIONS];     //to hold assigned device id's for the partitions
+
+// We need to remember several things about a device, not just its ID
+struct device{
+  File sdf;
+  unsigned char device_id;              //to hold assigned device id's for the partitions
+  unsigned long blocks;                 //how many 512-byte blocks this image has
+  unsigned int header_offset;           //Some image files have headers, skip this many bytes to avoid them
+  bool online;                          //Whether this image is currently available
+  bool writeable;
+};
+
+device devices[NUM_PARTITIONS];
 
 
 //The circuit:
@@ -146,7 +156,7 @@ SdFat sdcard;
 //todo: dynamic(?) array of files selected by user
 //File partition1;
 
-File sdf[4];
+//File sdf[4];
 
 
 //------------------------------------------------------------------------------
@@ -174,15 +184,12 @@ void setup() {
   String part = "PART";
   
   for(unsigned char i=0; i<NUM_PARTITIONS; i++){
-    sdf[i] = sdcard.open((part+(i+1)+".PO"), O_RDWR);
-    if(!sdf[i].isOpen()){
+    //TODO: get file names from EEPROM
+    open_image(devices[i], (part+(i+1)+".PO") );
+    if(!devices[i].sdf.isOpen()){
       Serial.print(F("\r\nImage "));
       Serial.print(i, DEC);
       Serial.print(F(" open error!"));
-    }
-    if(!is_valid_image(sdf[i])){
-      Serial.print(F("\r\nBad image file!"));
-      sdf[i].close();
     }
     Serial.print(F("\r\nFree memory after opening image "));
     Serial.print(i);
@@ -243,7 +250,7 @@ void loop() {
         number_partitions_initialised = 1; //reset number of partitions init'd
         noid = 0;   // to check if needed
         for (partition = 0; partition < NUM_PARTITIONS; partition++) //clear device_id table
-          device_id[partition] = 0;
+          devices[partition].device_id = 0;
         break;
 
       // phase lines for smartport bus enable
@@ -268,7 +275,7 @@ void loop() {
           // else check if its our one of our id's
           for  (partition = 0; partition < NUM_PARTITIONS; partition++)
           {
-            if ( device_id[partition] != packet_buffer[6])  //destination id
+            if ( devices[partition].device_id != packet_buffer[6])  //destination id
               noid++;
           }
           if (noid == NUM_PARTITIONS)  //not one of our id's
@@ -325,13 +332,13 @@ void loop() {
             digitalWrite(statusledPin, HIGH);
             source = packet_buffer[6];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (device_id[partition] == source) {  //yes it is, then reply
+              if (devices[partition].device_id == source) {  //yes it is, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 status_code = (packet_buffer[17] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
                 if (status_code == 0x03) { // if statcode=3, then status with device info block
-                  encode_status_dib_reply_packet(source);
+                  encode_status_dib_reply_packet(devices[partition]);
                 } else {  // else just return device status
-                  encode_status_reply_packet(source);
+                  encode_status_reply_packet(devices[partition]);
                 }
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
@@ -354,7 +361,7 @@ void loop() {
             LBL = packet_buffer[20];
             LBN = packet_buffer[19];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (device_id[partition] == source) {  //yes it is, then do the read
+              if (devices[partition].device_id == source) {  //yes it is, then do the read
                 // block num 1st byte
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = (LBN & 0x7f) | (((unsigned short)LBH << 3) & 0x80);
@@ -372,11 +379,11 @@ void loop() {
                 Serial.print(F("Read Block: "));
                 Serial.print(block_num);*/
 
-                if (!sdf[partition].seekSet(block_num*512)){
+                if (!devices[partition].sdf.seekSet(block_num*512)){
                   Serial.print(F("\r\nRead err!"));
                 }
                 
-                sdstato = sdf[partition].read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
+                sdstato = devices[partition].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
                   Serial.print(F("\r\nRead err!"));
                 }
@@ -400,7 +407,7 @@ void loop() {
           case 0x82:  //is a writeblock cmd
             source = packet_buffer[6];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (device_id[partition] == source) {  //yes it is, then do the write
+              if (devices[partition].device_id == source) {  //yes it is, then do the write
                 // block num 1st byte
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = (packet_buffer[19] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
@@ -425,10 +432,10 @@ void loop() {
                   //Serial.print(block_num);
                   digitalWrite(statusledPin, HIGH);
                   // TODO: add file object lookup
-                  if (!sdf[partition].seekSet(block_num*512)){
+                  if (!devices[partition].sdf.seekSet(block_num*512)){
                     Serial.print(F("\r\nWrite err!"));
                   }
-                  sdstato = sdf[partition].write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
+                  sdstato = devices[partition].sdf.write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
                   if (!sdstato) {
                     Serial.print(F("\r\nWrite err!"));
                     //Serial.print(F(" Block n.:"));
@@ -456,7 +463,7 @@ void loop() {
           case 0x83:  //is a format cmd
             source = packet_buffer[6];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (device_id[partition] == source) {  //yes it is, then reply to the format cmd
+              if (devices[partition].device_id == source) {  //yes it is, then reply to the format cmd
                 encode_init_reply_packet(source, 0x80); //just send back a successful response
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
@@ -474,12 +481,12 @@ void loop() {
             source = packet_buffer[6];
 
             if (number_partitions_initialised < NUM_PARTITIONS) { //are all init'd yet
-              device_id[number_partitions_initialised - 1] = source; //remember source id for partition
+              devices[number_partitions_initialised - 1].device_id = source; //remember source id for partition
               number_partitions_initialised++;
               status = 0x80;         //no, so status=0
             }
             else if (number_partitions_initialised == NUM_PARTITIONS) { // the last one
-              device_id[number_partitions_initialised - 1] = source; //remember source id for partition
+              devices[number_partitions_initialised - 1].device_id = source; //remember source id for partition
               number_partitions_initialised++;
               status = 0xff;         //yes, so status=non zero
             }
@@ -496,9 +503,9 @@ void loop() {
             //print_packet ((unsigned char*) packet_buffer,packet_length());
 
             if (number_partitions_initialised - 1 == NUM_PARTITIONS) {
-              for (partition = 0; partition < 4; partition++) {
+              for (partition = 0; partition < NUM_PARTITIONS; partition++) {
                 Serial.print(F("\r\nDrive: "));
-                Serial.print(device_id[partition], HEX);
+                Serial.print(devices[partition].device_id, HEX);
               }
             }
             break;
@@ -715,11 +722,13 @@ void encode_init_reply_packet (unsigned char source, unsigned char status)
 // Description: this is the reply to the status command packet. The reply
 // includes following:
 // data byte 1
-// data byte 2-4 number of blocks. 2 is the LSB and 4 the MSB. Hard coded for 32mb
-// partitions. eg 0x00ffff
+// data byte 2-4 number of blocks. 2 is the LSB and 4 the MSB. 
+// Size determined from image file.
 //*****************************************************************************
-void encode_status_reply_packet (unsigned char source)
+void encode_status_reply_packet (device d)
 {
+
+  
   unsigned char checksum = 0;
 
   packet_buffer[0] = 0xff;  //sync bytes
@@ -731,7 +740,7 @@ void encode_status_reply_packet (unsigned char source)
 
   packet_buffer[6] = 0xc3;  //PBEGIN - start byte
   packet_buffer[7] = 0x80;  //DEST - dest id - host
-  packet_buffer[8] = source; //SRC - source id - us
+  packet_buffer[8] = d.device_id; //SRC - source id - us
   packet_buffer[9] = 0x81;  //TYPE -status
   packet_buffer[10] = 0x80; //AUX
   packet_buffer[11] = 0x80; //STAT - data status
@@ -740,9 +749,9 @@ void encode_status_reply_packet (unsigned char source)
   //4 odd bytes
   packet_buffer[14] = 0xf0; //odd msb
   packet_buffer[15] = 0xf8; //data 1 -f8
-  packet_buffer[16] = 0xff; //data 2 -ff
-  packet_buffer[17] = 0xff; //data 3 -ff
-  packet_buffer[18] = 0x80; //data 4 -00
+  packet_buffer[16] = d.blocks & 0xff; //data 2 
+  packet_buffer[17] = (d.blocks >> 8 ) & 0xff; //data 3 
+  packet_buffer[18] = (d.blocks >> 16 ) & 0xff | 0x80; //data 4 
   //number of blocks =0x00ffff = 65525 or 32mb
   //calc the data bytes checksum
   checksum = checksum ^ 0xf8;
@@ -766,10 +775,10 @@ void encode_status_reply_packet (unsigned char source)
 // Description: this is the reply to the status command 03 packet. The reply
 // includes following:
 // data byte 1
-// data byte 2-4 number of blocks. 2 is the LSB and 4 the MSB. Hard coded for 32mb
-// partitions. eg 0x00ffff
+// data byte 2-4 number of blocks. 2 is the LSB and 4 the MSB.
+// Calculated from actual image file size.
 //*****************************************************************************
-void encode_status_dib_reply_packet (unsigned char source)
+void encode_status_dib_reply_packet (device d)
 {
   unsigned char checksum = 0;
 
@@ -782,7 +791,7 @@ void encode_status_dib_reply_packet (unsigned char source)
 
   packet_buffer[6] = 0xc3;  //PBEGIN - start byte
   packet_buffer[7] = 0x80;  //DEST - dest id - host
-  packet_buffer[8] = source; //SRC - source id - us
+  packet_buffer[8] = d.device_id; //SRC - source id - us
   packet_buffer[9] = 0x81;  //TYPE -status
   packet_buffer[10] = 0x80; //AUX
   packet_buffer[11] = 0x80; //STAT - data status
@@ -791,9 +800,9 @@ void encode_status_dib_reply_packet (unsigned char source)
   packet_buffer[14] = 0xf0; //grp1 msb
   packet_buffer[15] = 0xf8; //general status - f8
   //number of blocks =0x00ffff = 65525 or 32mb
-  packet_buffer[16] = 0xff; //block size 1 -ff
-  packet_buffer[17] = 0xff; //block size 2 -ff
-  packet_buffer[18] = 0x80; //block size 3 -00
+  packet_buffer[16] = d.blocks & 0xff; //block size 1 
+  packet_buffer[17] = (d.blocks >> 8 ) & 0xff; //block size 2 
+  packet_buffer[18] = (d.blocks >> 16 ) & 0xff | 0x80 ; //block size 3 - why is the high bit set?
   packet_buffer[19] = 0x8d; //ID string length - 13 chars
   packet_buffer[20] = 'Sm';  //ID string (16 chars total)
   packet_buffer[22] = 0x80; //grp2 msb
@@ -1149,23 +1158,27 @@ int freeMemory() {
 
 
 // TODO: Allow image files with headers, too
-bool is_valid_image(File imageFile){
+// TODO: Respect read-only bit in header
 
+bool open_image( device &d, String filename ){
+  d.sdf = sdcard.open(filename, O_RDWR);
+  
   Serial.print(F("\r\nTesting file "));
-  imageFile.printName();
-  if(!imageFile.isOpen()||!imageFile.isFile()){
+  d.sdf.printName();
+  if(!d.sdf.isOpen()||!d.sdf.isFile()){
     Serial.print(F("\r\nFile must exist, be open and be a regular "));
     Serial.print(F("file before checking for valid image type!"));
     return false;
   }
 
-  if(imageFile.size() != (imageFile.size()>>9)<<9||imageFile.size()==0){
+  if(d.sdf.size() != (d.sdf.size()>>9)<<9||d.sdf.size()==0){
     Serial.print(F("\r\nFile must be an unadorned ProDOS order image with no header!"));
     Serial.print(F("\r\nThis means its size must be an exact multiple of 512!"));
     return false;
   }
 
   Serial.print(F("\r\nFile good!"));
+  d.blocks = d.sdf.size() >> 9;
+
   return true;
-  
 }
