@@ -24,7 +24,7 @@
 // 1.13 - Fixed an issue where the block number was calculated incorrectly, leading to
 //        failed operations. Now Total Replay v3 works!
 //
-// 1.14 - Now uses FAT filesystem on the SD card instead of raw layout.
+// 1.15 - Now uses FAT filesystem on the SD card instead of raw layout.
 //
 // Apple disk interface is connected as follows:
 // wrprot = pa5 (ack) (output)
@@ -50,7 +50,7 @@
 
 //x #include <SPI.h>
 #include "SdFat.h"
-//#include <EEPROM.h>
+#include <avr/eeprom.h>
 
 // Set USE_SDIO to zero for SPI card access.
 // Deprecated maintly because I don't want to
@@ -96,7 +96,8 @@ struct device{
   unsigned char device_id;              //to hold assigned device id's for the partitions
   unsigned long blocks;                 //how many 512-byte blocks this image has
   unsigned int header_offset;           //Some image files have headers, skip this many bytes to avoid them
-  bool online;                          //Whether this image is currently available
+  //bool online;                          //Whether this image is currently available
+                                          //No longer used, user devices[...].sdf.isOpen() instead
   bool writeable;
 };
 
@@ -176,12 +177,11 @@ void setup() {
   mcuInit();
   Serial.begin(230400);
   Serial.print(F("\r\nSmartportSD v1.14a\r\n"));
-//  initPartition = EEPROM.read(0);
-  initPartition=0;
+  initPartition = eeprom_read_byte(0);
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
-  //Serial.print(F("\r\nBoot partition: "));
-  //Serial.print(initPartition, DEC);
+  Serial.print(F("\r\nBoot partition: "));
+  Serial.print(initPartition, DEC);
 
   pinMode(ejectPin, INPUT);
   print_hd_info(); //bad! something that prints things shouldn't do essential setup
@@ -271,7 +271,7 @@ void loop() {
       case 0x0b:
       case 0x0e:
       case 0x0f:
-        //Serial.print(F(("E "))); //this is timing sensitive, so can't print to much here as it takes to long
+        //Serial.print(("E ")); //this is timing sensitive, so can't print to much here as it takes to long
         noInterrupts();
         DDRC = 0xFF;   //set ack to output, sp bus is enabled
         if ((status = ReceivePacket( (unsigned char*) packet_buffer))) {
@@ -291,7 +291,7 @@ void loop() {
           // else check if its our one of our id's
           for  (partition = 0; partition < NUM_PARTITIONS; partition++)
           {
-            if ( devices[partition].device_id != packet_buffer[6])  //destination id
+            if ( devices[(partition + initPartition) % NUM_PARTITIONS].device_id != packet_buffer[6])  //destination id
               noid++;
           }
           if (noid == NUM_PARTITIONS)  //not one of our id's
@@ -383,7 +383,8 @@ void loop() {
             digitalWrite(statusledPin, HIGH);
             source = packet_buffer[6];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (devices[partition].device_id == source) {  //yes it is, then reply
+              if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source
+                && devices[(partition + initPartition) % NUM_PARTITIONS].sdf.isOpen() ) {  //yes it is, and it's online, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 status_code = (packet_buffer[17] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
                 //Serial.print(F("\r\nHere's the whole status packet!"));
@@ -393,16 +394,16 @@ void loop() {
                 //print_packet((unsigned char*) packet_buffer, 9); //Standard SmartPort command is 9 bytes
                 if (status_code == 0x03) { // if statcode=3, then status with device info block
                   //Serial.print(F("\r\n******** Sending DIB! ********"));
-                  encode_status_dib_reply_packet(devices[partition]);
+                  encode_status_dib_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);
                 } else {  // else just return device status
                   /*Serial.print(F("\r\n-------- Sending status! --------"));
                   Serial.print(F("\r\nSource: "));
                   Serial.print(source,HEX);
                   Serial.print(F(" Partition ID: "));
-                  Serial.print(devices[partition].device_id, HEX);
+                  Serial.print(devices[(partition + initPartition) % NUM_PARTITIONS].device_id, HEX);
                   Serial.print(F(" Status code: "));
                   Serial.print(status_code, HEX);*/
-                  encode_status_reply_packet(devices[partition]);        
+                  encode_status_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);        
                 }
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
@@ -436,21 +437,21 @@ void loop() {
             source = packet_buffer[6];
             Serial.println(source, HEX);
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (devices[partition].device_id == source) {  //yes it is, then reply
+              if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 status_code = (packet_buffer[17] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
                 Serial.println(status_code, HEX);
                 if (status_code == 0x03) { // if statcode=3, then status with device info block
                   Serial.println(F("Extended status DIB!"));
                   delay(50);
-                  encode_extended_status_dib_reply_packet(devices[partition]);
+                  encode_extended_status_dib_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);
                 } else {  // else just return device status
                   Serial.println(F("\r\nExtended status non-DIB! Part: "));
                   Serial.print(partition, HEX);
                   Serial.print(F(" code: "));
                   Serial.print(status_code, HEX);
                   delay(50);
-                  encode_extended_status_reply_packet(devices[partition]);        
+                  encode_extended_status_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);        
                 }
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
@@ -478,7 +479,7 @@ void loop() {
             LBL = packet_buffer[19]; //block number middle
             LBN = packet_buffer[18]; //block number low
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (devices[partition].device_id == source) {  //yes it is, then do the read
+              if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then do the read
                 // block num 1st byte
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = (LBN & 0x7f) | (((unsigned short)LBH << 3) & 0x80);
@@ -499,11 +500,11 @@ void loop() {
                 Serial.print(F("Read Block: "));
                 Serial.print(block_num);
 
-                if (!devices[partition].sdf.seekSet(block_num*512)){
+                if (!devices[(partition + initPartition) % NUM_PARTITIONS].sdf.seekSet(block_num*512)){
                   Serial.print(F("\r\nRead err!"));
                 }
                 
-                sdstato = devices[partition].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
+                sdstato = devices[(partition + initPartition) % NUM_PARTITIONS].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
                   Serial.print(F("\r\nRead err!"));
                 }
@@ -535,7 +536,7 @@ void loop() {
             LBL = packet_buffer[20]; //block number middle
             LBN = packet_buffer[19]; //block number low
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (devices[partition].device_id == source) {  //yes it is, then do the read
+              if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then do the read
                 // block num 1st byte
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = (LBN & 0x7f) | (((unsigned short)LBH << 3) & 0x80);
@@ -555,11 +556,20 @@ void loop() {
                 Serial.print(F("Read Block: "));
                 Serial.print(block_num);*/
 
-                if (!devices[partition].sdf.seekSet(block_num*512)){
-                  Serial.print(F("\r\nRead err!"));
+                if (!devices[(partition + initPartition) % NUM_PARTITIONS].sdf.seekSet(block_num*512)){
+                  Serial.print(F("\r\nRead seek err!"));
+                  Serial.print(F("\r\nPartition #"));
+                  Serial.print((partition + initPartition) % NUM_PARTITIONS);
+                  Serial.print(F(" block #"));
+                  Serial.print(block_num);
+                  if(devices[(partition + initPartition) % NUM_PARTITIONS].sdf.isOpen()){
+                    Serial.print(F("\r\nPartition file is open!"));
+                  }else{
+                    Serial.print(F("\r\nPartition file is closed!"));
+                  }
                 }
                 
-                sdstato = devices[partition].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
+                sdstato = devices[(partition + initPartition) % NUM_PARTITIONS].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
                   Serial.print(F("\r\nRead err!"));
                 }
@@ -583,7 +593,7 @@ void loop() {
           case 0x82:  //is a writeblock cmd
             source = packet_buffer[6];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (devices[partition].device_id == source) {  //yes it is, then do the write
+              if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then do the write
                 // block num 1st byte
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = (packet_buffer[19] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
@@ -608,10 +618,10 @@ void loop() {
                   //Serial.print(block_num);
                   digitalWrite(statusledPin, HIGH);
                   // TODO: add file object lookup
-                  if (!devices[partition].sdf.seekSet(block_num*512)){
-                    Serial.print(F("\r\nWrite err!"));
+                  if (!devices[(partition + initPartition) % NUM_PARTITIONS].sdf.seekSet(block_num*512)){
+                    Serial.print(F("\r\nWrite seek err!"));
                   }
-                  sdstato = devices[partition].sdf.write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
+                  sdstato = devices[(partition + initPartition) % NUM_PARTITIONS].sdf.write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
                   if (!sdstato) {
                     Serial.print(F("\r\nWrite err!"));
                     //Serial.print(F(" Block n.:"));
@@ -639,7 +649,7 @@ void loop() {
           case 0x83:  //is a format cmd
             source = packet_buffer[6];
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-              if (devices[partition].device_id == source) {  //yes it is, then reply to the format cmd
+              if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then reply to the format cmd
                 encode_init_reply_packet(source, 0x80); //just send back a successful response
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
@@ -657,12 +667,12 @@ void loop() {
             source = packet_buffer[6];
 
             if (number_partitions_initialised < NUM_PARTITIONS) { //are all init'd yet
-              devices[number_partitions_initialised - 1].device_id = source; //remember source id for partition
+              devices[(number_partitions_initialised - 1 + initPartition) % NUM_PARTITIONS].device_id = source; //remember source id for partition
               number_partitions_initialised++;
               status = 0x80;         //no, so status=0
             }
             else if (number_partitions_initialised == NUM_PARTITIONS) { // the last one
-              devices[number_partitions_initialised - 1].device_id = source; //remember source id for partition
+              devices[(number_partitions_initialised - 1 + initPartition) % NUM_PARTITIONS].device_id = source; //remember source id for partition
               number_partitions_initialised++;
               status = 0xff;         //yes, so status=non zero
             }
@@ -681,7 +691,7 @@ void loop() {
             if (number_partitions_initialised - 1 == NUM_PARTITIONS) {
               for (partition = 0; partition < NUM_PARTITIONS; partition++) {
                 Serial.print(F("\r\nDrive: "));
-                Serial.print(devices[partition].device_id, HEX);
+                Serial.print(devices[(partition + initPartition) % NUM_PARTITIONS].device_id, HEX);
               }
             }
             break;          
@@ -1428,17 +1438,30 @@ void print_hd_info(void)
 int rotate_boot (void)
 {
     int i;
-  initPartition = initPartition++;
-  Serial.print(F("\r\nBoot uno: "));
-  Serial.print(initPartition, DEC);
-  initPartition = initPartition + 1;
-  Serial.print(F("\r\nBoot due: "));
-  Serial.print(initPartition, DEC);
 
-  initPartition = initPartition % 4;
-//  EEPROM.write(0, initPartition);
+  for(i = 0; i < NUM_PARTITIONS; i++){
+    Serial.print(F("\r\nInit partition was: "));
+    Serial.print(initPartition, DEC);
+    initPartition++;
+    initPartition = initPartition % 4;
+    //Find the next partition that's available 
+    //and set it to be the boot partition
+    if(devices[initPartition].sdf.isOpen()){
+      Serial.print(F("\r\nSelecting boot partition number "));
+      Serial.print(initPartition, DEC);
+      break;
+    }
+  }
+
+  if(i == NUM_PARTITIONS){
+    Serial.print(F("\r\nNo online partitions found. Check that you have a file called PARTx.PO and try again, where x is from 1 to "));
+    Serial.print(NUM_PARTITIONS, DEC);
+    initPartition = 0;
+  }
+
+  eeprom_write_byte(0, initPartition);
   digitalWrite(statusledPin, HIGH);
-  Serial.print(F("\r\nBoot partition: "));
+  Serial.print(F("\r\nChanging boot partition to: "));
   Serial.print(initPartition, DEC);
  while (1){
    for (i=0;i<(initPartition+1);i++) {
@@ -1450,6 +1473,7 @@ int rotate_boot (void)
    delay(600);
  }
   // stop programs
+  
 }
 
 //*****************************************************************************
@@ -1628,7 +1652,7 @@ bool open_image( device &d, String filename ){
 
 bool is_ours(unsigned char source){
   for (unsigned char partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
-    if (devices[partition].device_id == source) {  //yes it is
+    if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is
       return true;
     }
   }
