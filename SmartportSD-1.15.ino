@@ -176,7 +176,7 @@ void setup() {
   // put your setup code here, to run once:
   mcuInit();
   Serial.begin(230400);
-  Serial.print(F("\r\nSmartportSD v1.14a\r\n"));
+  Serial.print(F("\r\nSmartportSD v1.15\r\n"));
   initPartition = eeprom_read_byte(0);
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
