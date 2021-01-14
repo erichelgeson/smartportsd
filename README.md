@@ -31,6 +31,10 @@ The Apple needs more than the 500mA your modern computer's USB power supply can 
 
 Name your images PART1.PO through PART4.PO. If you don't have four images that's OK, the missing ones will be skipped.
 
+###NOTE
+
+Images must be unadorned ProDOS-order images. They don't have to be ProDOS file systems though - ISO9660, DOS 3.3 and HFS should work (although they are currently untested).
+
 ## Change boot  order, if you want
 
 The eject button, if you have it wired up, will work the same way as it does in Robert's version of the code. Hold the button down while power cycling the Apple (or pressing the Arduino reset button if the USB connection is supplying power) to choose the next of the four images as the new startup disk. Then power cycle (or reset) the Arduino again without the button held down to get ready for the next boot.
