@@ -31,7 +31,7 @@ The Apple needs more than the 500mA your modern computer's USB power supply can 
 
 Name your images PART1.PO through PART4.PO. If you don't have four images that's OK, the missing ones will be skipped.
 
-###NOTE
+### NOTE
 
 Images must be unadorned ProDOS-order images. They don't have to be ProDOS file systems though - ISO9660, DOS 3.3 and HFS should work (although they are currently untested).
 
