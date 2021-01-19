@@ -371,10 +371,10 @@ void loop() {
         //Serial.print(packet_buffer[14],HEX);
         //print_packet ((unsigned char*) packet_buffer,packet_length());
         if(packet_buffer[14]>=0xC0){
-            //Serial.print(F("\r\nExtended packet!"));
-            //Serial.print(F("\r\nHere's our packet!"));
-            //print_packet ((unsigned char*) packet_buffer, packet_length());
-            //delay(50);
+           // Serial.print(F("\r\nExtended packet!"));
+           // Serial.print(F("\r\nHere's our packet!"));
+           // print_packet ((unsigned char*) packet_buffer, packet_length());
+           // delay(50);
         }
 
         switch (packet_buffer[14]) {
@@ -386,23 +386,31 @@ void loop() {
               if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source
                 && devices[(partition + initPartition) % NUM_PARTITIONS].sdf.isOpen() ) {  //yes it is, and it's online, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
-                status_code = (packet_buffer[17] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
-                //Serial.print(F("\r\nHere's the whole status packet!"));
+                status_code = (packet_buffer[19] & 0x7f); // | (((unsigned short)packet_buffer[16] << 3) & 0x80);
+                //Serial.print(F("\r\nStatus code: "));
+                //Serial.print(status_code);
                 //print_packet ((unsigned char*) packet_buffer, packet_length());
                 //Serial.print(F("\r\nHere's the decoded status packet because frig doing it by hand!"));
                 //decode_data_packet();
                 //print_packet((unsigned char*) packet_buffer, 9); //Standard SmartPort command is 9 bytes
+                //if (status_code |= 0x00) { // TEST
+                //  Serial.print(F("\r\nStatus not zero!! ********"));
+                //  print_packet ((unsigned char*) packet_buffer,packet_length());}
                 if (status_code == 0x03) { // if statcode=3, then status with device info block
-                  //Serial.print(F("\r\n******** Sending DIB! ********"));
+                  Serial.print(F("\r\n******** Sending DIB! ********"));
                   encode_status_dib_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);
+                  //print_packet ((unsigned char*) packet_buffer,packet_length());
+                  delay(50);
                 } else {  // else just return device status
-                  /*Serial.print(F("\r\n-------- Sending status! --------"));
+                  /*
+                  Serial.print(F("\r\n-------- Sending status! --------"));
                   Serial.print(F("\r\nSource: "));
                   Serial.print(source,HEX);
                   Serial.print(F(" Partition ID: "));
                   Serial.print(devices[(partition + initPartition) % NUM_PARTITIONS].device_id, HEX);
                   Serial.print(F(" Status code: "));
-                  Serial.print(status_code, HEX);*/
+                  Serial.print(status_code, HEX);
+                  */
                   encode_status_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);        
                 }
                 noInterrupts();
@@ -412,7 +420,6 @@ void loop() {
                 interrupts();
                 //printf_P(PSTR("\r\nSent Packet Data\r\n") );
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
-                //Serial.print(F("\r\nStatus CMD"));
                 digitalWrite(statusledPin, LOW);
               }
             }
@@ -433,24 +440,24 @@ void loop() {
             break;
 
           case 0xC0:  //Extended status cmd
-            /*digitalWrite(statusledPin, HIGH);
+            digitalWrite(statusledPin, HIGH);
             source = packet_buffer[6];
-            Serial.println(source, HEX);
+            //Serial.println(source, HEX);
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
               if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
-                status_code = (packet_buffer[17] & 0x7f) | (((unsigned short)packet_buffer[16] << 3) & 0x80);
-                Serial.println(status_code, HEX);
-                if (status_code == 0x03) { // if statcode=3, then status with device info block
+                status_code = (packet_buffer[21] & 0x7f);
+                 Serial.print(F("\r\nExtended Status CMD:"));
+                 Serial.print(status_code, HEX);
+                 print_packet ((unsigned char*) packet_buffer,packet_length());
+                 if (status_code == 0x03) { // if statcode=3, then status with device info block
                   Serial.println(F("Extended status DIB!"));
-                  delay(50);
-                  encode_extended_status_dib_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);
                 } else {  // else just return device status
-                  Serial.println(F("\r\nExtended status non-DIB! Part: "));
-                  Serial.print(partition, HEX);
-                  Serial.print(F(" code: "));
-                  Serial.print(status_code, HEX);
-                  delay(50);
+                  //Serial.print(F("\r\nExtended status non-DIB! Part: "));
+                  //Serial.print(partition, HEX);
+                  //Serial.print(F(" code: "));
+                  //Serial.print(status_code, HEX);
+                  //delay(50);
                   encode_extended_status_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);        
                 }
                 noInterrupts();
@@ -464,8 +471,9 @@ void loop() {
                 digitalWrite(statusledPin, LOW);
               }
             }
-            Serial.print(F("\r\nHere's our reply!"));
-            print_packet ((unsigned char*) packet_buffer, packet_length());*/
+            //Serial.print(F("\r\nHere's our reply!"));
+            //print_packet ((unsigned char*) packet_buffer, packet_length());
+            //*/
             break;  
 
           case 0xC1:  //extended readblock cmd
@@ -998,7 +1006,6 @@ void encode_init_reply_packet (unsigned char source, unsigned char status)
 void encode_status_reply_packet (device d)
 {
 
-  
   unsigned char checksum = 0;
   unsigned char data[4];
 
@@ -1155,7 +1162,6 @@ void encode_error_reply_packet (unsigned char source)
 
 }
 
-
 //*****************************************************************************
 // Function: encode_status_dib_reply_packet
 // Parameters: source
@@ -1169,7 +1175,78 @@ void encode_error_reply_packet (unsigned char source)
 //*****************************************************************************
 void encode_status_dib_reply_packet (device d)
 {
-  unsigned char checksum = 0;
+  int grpbyte, grpcount, i;
+  int grpnum, oddnum; 
+  unsigned char checksum = 0, grpmsb;
+  unsigned char group_buffer[7];
+  unsigned char data[25];
+  //data buffer=25: 3 x Grp7 + 4 odds
+  grpnum=3;
+  oddnum=4;
+  
+  //* write data buffer first (25 bytes) 3 grp7 + 4 odds
+  data[0] = 0xf8; //general status - f8 
+  //number of blocks =0x00ffff = 65525 or 32mb
+  data[1] = d.blocks & 0xff; //block size 1 
+  data[2] = (d.blocks >> 8 ) & 0xff; //block size 2 
+  data[3] = (d.blocks >> 16 ) & 0xff ; //block size 3 
+  data[4] = 0x0b; //ID string length - 11 chars
+  data[5] = 'S';
+  data[6] = 'M';
+  data[7] = 'A';
+  data[8] = 'R';
+  data[9] = 'T';
+  data[10] = 'P';
+  data[11] = 'O';
+  data[12] = 'R';
+  data[13] = 'T';
+  data[14] = 'S';
+  data[15] = 'D';
+  data[16] = ' ';
+  data[17] = ' ';
+  data[18] = ' ';
+  data[19] = ' ';
+  data[20] = ' ';  //ID string (16 chars total)
+  data[21] = 0x02; //Device type    - 0x02  harddisk
+  data[22] = 0x0a; //Device Subtype - 0x0a
+  data[23] = 0x01; //Firmware version 2 bytes
+  data[24] = 0x0f; //
+    
+
+ // print_packet ((unsigned char*) data,packet_length()); // debug
+ // Serial.print(F("\nData loaded"));
+// Calculate checksum of sector bytes before we destroy them
+    for (count = 0; count < 25; count++) // xor all the data bytes
+    checksum = checksum ^ data[count];
+
+ // Start assembling the packet at the rear and work 
+  // your way to the front so we don't overwrite data
+  // we haven't encoded yet
+
+  //grps of 7
+  for (grpcount = grpnum-1; grpcount >= 0; grpcount--) // 3
+  {
+    for (i=0;i<8;i++) {
+      group_buffer[i]=data[i + oddnum + (grpcount * 7)];
+    }
+    // add group msb byte
+    grpmsb = 0;
+    for (grpbyte = 0; grpbyte < 7; grpbyte++)
+      grpmsb = grpmsb | ((group_buffer[grpbyte] >> (grpbyte + 1)) & (0x80 >> (grpbyte + 1)));
+    packet_buffer[(14 + oddnum + 1) + (grpcount * 8)] = grpmsb | 0x80; // set msb to one
+
+    // now add the group data bytes bits 6-0
+    for (grpbyte = 0; grpbyte < 7; grpbyte++)
+      packet_buffer[(14 + oddnum + 2) + (grpcount * 8) + grpbyte] = group_buffer[grpbyte] | 0x80;
+  }
+       
+            
+  //odd byte
+  packet_buffer[14] = 0x80 | ((data[0]>> 1) & 0x40) | ((data[1]>>2) & 0x20) | (( data[2]>>3) & 0x10) | ((data[3]>>4) & 0x08 ); //odd msb
+  packet_buffer[15] = data[0] | 0x80;
+  packet_buffer[16] = data[1] | 0x80;
+  packet_buffer[17] = data[2] | 0x80;
+  packet_buffer[18] = data[3] | 0x80;;
 
   packet_buffer[0] = 0xff;  //sync bytes
   packet_buffer[1] = 0x3f;
@@ -1177,7 +1254,6 @@ void encode_status_dib_reply_packet (device d)
   packet_buffer[3] = 0xf3;
   packet_buffer[4] = 0xfc;
   packet_buffer[5] = 0xff;
-
   packet_buffer[6] = 0xc3;  //PBEGIN - start byte
   packet_buffer[7] = 0x80;  //DEST - dest id - host
   packet_buffer[8] = d.device_id; //SRC - source id - us
@@ -1186,33 +1262,14 @@ void encode_status_dib_reply_packet (device d)
   packet_buffer[11] = 0x80; //STAT - data status
   packet_buffer[12] = 0x84; //ODDCNT - 4 data bytes
   packet_buffer[13] = 0x83; //GRP7CNT - 3 grps of 7
-  packet_buffer[14] = 0xf0; //grp1 msb
-  packet_buffer[15] = 0xf8; //general status - f8
-  //number of blocks =0x00ffff = 65525 or 32mb
-  packet_buffer[16] = d.blocks & 0xff; //block size 1 
-  packet_buffer[17] = (d.blocks >> 8 ) & 0xff; //block size 2 
-  packet_buffer[18] = (d.blocks >> 16 ) & 0xff | 0x80 ; //block size 3 - why is the high bit set?
-  packet_buffer[19] = 0x8d; //ID string length - 13 chars
-  packet_buffer[20] = 'Sm';  //ID string (16 chars total)
-  packet_buffer[22] = 0x80; //grp2 msb
-  packet_buffer[23] = 'artport';
-  packet_buffer[30] = 0x80; //grp3 msb
-  packet_buffer[31] = ' CFA   ';
-  packet_buffer[38] = 0x80; //odd msb
-  packet_buffer[39] = 0x82; //Device type    - 0x02  harddisk
-  packet_buffer[40] = 0x80; //Device Subtype - 0x20
-  packet_buffer[41] = 0x81; //Firmware version 2 bytes
-  packet_buffer[42] = 0x90; //
-
-
-  for (count = 7; count < 43; count++) // xor the packet bytes
+   
+  for (count = 7; count < 14; count++) // xor the packet header bytes
     checksum = checksum ^ packet_buffer[count];
   packet_buffer[43] = checksum | 0xaa;      // 1 c6 1 c4 1 c2 1 c0
   packet_buffer[44] = checksum >> 1 | 0xaa; // 1 c7 1 c5 1 c3 1 c1
 
   packet_buffer[45] = 0xc8; //PEND
   packet_buffer[46] = 0x00; //end of packet in buffer
-
 }
 
 
@@ -1243,8 +1300,8 @@ void encode_extended_status_dib_reply_packet (device d)
   packet_buffer[8] = d.device_id; //SRC - source id - us
   packet_buffer[9] = 0x81;  //TYPE -status
   packet_buffer[10] = 0x80; //AUX
-  packet_buffer[11] = 0x80; //STAT - data status
-  packet_buffer[12] = 0x84; //ODDCNT - 4 data bytes
+  packet_buffer[11] = 0x83; //STAT - data status
+  packet_buffer[12] = 0x80; //ODDCNT - 4 data bytes
   packet_buffer[13] = 0x83; //GRP7CNT - 3 grps of 7
   packet_buffer[14] = 0xf0; //grp1 msb
   packet_buffer[15] = 0xf8; //general status - f8
@@ -1258,20 +1315,21 @@ void encode_extended_status_dib_reply_packet (device d)
   packet_buffer[23] = 0x80; //grp2 msb
   packet_buffer[24] = 'artport';
   packet_buffer[31] = 0x80; //grp3 msb
-  packet_buffer[32] = ' CFA   ';
+  packet_buffer[32] = ' SD    ';
   packet_buffer[39] = 0x80; //odd msb
-  packet_buffer[40] = 0x82; //Device type    - 0x02  harddisk
-  packet_buffer[41] = 0xA0; //Device Subtype - 0x20
-  packet_buffer[42] = 0x81; //Firmware version 2 bytes
-  packet_buffer[43] = 0x90; //
+  packet_buffer[40] = 0x02; //Device type    - 0x02  harddisk
+  packet_buffer[41] = 0x00; //Device Subtype - 0x20
+  packet_buffer[42] = 0x01; //Firmware version 2 bytes
+  packet_buffer[43]=  0x0f;
+  packet_buffer[44] = 0x90; //
 
-  for (count = 7; count < 44; count++) // xor the packet bytes
+  for (count = 7; count < 45; count++) // xor the packet bytes
     checksum = checksum ^ packet_buffer[count];
-  packet_buffer[44] = checksum | 0xaa;      // 1 c6 1 c4 1 c2 1 c0
-  packet_buffer[45] = checksum >> 1 | 0xaa; // 1 c7 1 c5 1 c3 1 c1
+  packet_buffer[45] = checksum | 0xaa;      // 1 c6 1 c4 1 c2 1 c0
+  packet_buffer[46] = checksum >> 1 | 0xaa; // 1 c7 1 c5 1 c3 1 c1
 
-  packet_buffer[46] = 0xc8; //PEND
-  packet_buffer[47] = 0x00; //end of packet in buffer
+  packet_buffer[47] = 0xc8; //PEND
+  packet_buffer[48] = 0x00; //end of packet in buffer
 
 }
 
