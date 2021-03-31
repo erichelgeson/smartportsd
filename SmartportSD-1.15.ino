@@ -101,6 +101,8 @@ struct device{
   bool writeable;
 };
 
+unsigned int partition_led_pins[4] = {14, 15, 16, 8};
+
 device devices[NUM_PARTITIONS];
 
 enum uiState{
@@ -177,11 +179,18 @@ void setup() {
   mcuInit();
   Serial.begin(230400);
   Serial.print(F("\r\nSmartportSD v1.15\r\n"));
+
+  for(unsigned char i=0; i<4; i++){
+    pinMode(partition_led_pins[i], OUTPUT);
+    digitalWrite(partition_led_pins[i], LOW);
+  }
+  
   initPartition = eeprom_read_byte(0);
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
   Serial.print(F("\r\nBoot partition: "));
   Serial.print(initPartition, DEC);
+  digitalWrite(partition_led_pins[initPartition], HIGH);
 
   pinMode(ejectPin, INPUT);
   print_hd_info(); //bad! something that prints things shouldn't do essential setup
@@ -1524,8 +1533,10 @@ int rotate_boot (void)
  while (1){
    for (i=0;i<(initPartition+1);i++) {
      digitalWrite(statusledPin,HIGH);
+     digitalWrite(partition_led_pins[initPartition], HIGH);
      delay(200);   
      digitalWrite(statusledPin,LOW);
+     digitalWrite(partition_led_pins[initPartition], LOW);
      delay(100);   
    }
    delay(600);
