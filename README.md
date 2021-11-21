@@ -1,4 +1,4 @@
-# SmartportSD FAT version 1.15
+# SmartportSD
 
 This is an enhancement of the [SmartportCFA/SmartportSD](http://www.users.on.net/~rjustice/SmartportCFA/SmartportCFA.htm) project by Robert Justice and Andrea Ottaviani. Instead of relying on four raw disk images written sequentially to an SD card, this version allows you to have up to four files on a FAT or FAT32 formatted SD card instead.
 
@@ -6,13 +6,7 @@ This is an enhancement of the [SmartportCFA/SmartportSD](http://www.users.on.net
 
 ## Get the code
 
-Use git to clone the code and rename the enclosing folder to SmartportSD-1.15. (This is an annoying quirk of the Arduino environment, that requires the name of the code file to match the name of the folder it's in).
-
-## Get the dependencies
-
-Download the latest version of the [SdFat Arduino library](https://github.com/greiman/SdFat/) and install it in your Arduino libraries folder (that location is system-dependent so you'll have to figure out where it is for you, sorry).
-
-## Compile and upload the code to the Arduino
+Use git to clone the repo and open in PlatformIO.
 
 ## Wire up the Arduino
 
