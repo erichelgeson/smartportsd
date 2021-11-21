@@ -31,6 +31,7 @@
 //        Removed Depricated code
 //        Upgraded to SDFat 2.1.1
 //        Fixed baud rate in platformio
+//        Rotate more than once between resets
 //
 // Apple disk interface is connected as follows:
 // wrprot = pa5 (ack) (output)
@@ -1511,19 +1512,23 @@ int rotate_boot (void)
   digitalWrite(statusledPin, HIGH);
   LOG(F("\r\nChanging boot partition to: "));
   LOGDEC(initPartition);
-  while (1){
-   for (i=0;i<(initPartition+1);i++) {
-     digitalWrite(statusledPin,HIGH);
-     digitalWrite(partition_led_pins[initPartition], HIGH);
-     delay(200);   
-     digitalWrite(statusledPin,LOW);
-     digitalWrite(partition_led_pins[initPartition], LOW);
-     delay(100);   
-   }
-   delay(600);
- }
+  while (1) {
+    for (i=0;i<(initPartition+1);i++) {
+      digitalWrite(statusledPin,HIGH);
+      digitalWrite(partition_led_pins[initPartition], HIGH);
+      delay(200);
+      digitalWrite(statusledPin,LOW);
+      digitalWrite(partition_led_pins[initPartition], LOW);
+      delay(100);
+    }
+    delay(600);
+    // Rotate more than once between reboots.
+    if (digitalRead(ejectPin) == HIGH) {
+      rotate_boot();
+      break;
+    }
+  }
   // stop programs
-  
 }
 
 //*****************************************************************************
