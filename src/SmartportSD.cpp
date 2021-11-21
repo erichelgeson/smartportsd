@@ -29,7 +29,6 @@
 // 1.xx - Moved to PlatformIO
 //        Fixed Debug logging
 //        Removed Depricated code
-//        Upgraded to SDFat 2.1.1
 //        Fixed baud rate in platformio
 //        Rotate more than once between resets
 //
