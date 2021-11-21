@@ -26,6 +26,12 @@
 //
 // 1.15 - Now uses FAT filesystem on the SD card instead of raw layout.
 //
+// 1.xx - Moved to PlatformIO
+//        Fixed Debug logging
+//        Removed Depricated code
+//        Upgraded to SDFat 2.1.1
+//        Fixed baud rate in platformio
+//
 // Apple disk interface is connected as follows:
 // wrprot = pa5 (ack) (output)
 // ph0    = pd2 (req) (input)
@@ -61,10 +67,10 @@
 #define PORT_ACK    PORTC   // Define the PORT to ACK
 #define PIN_ACK     5       // Define the PIN number to ACK
 #define NUM_PARTITIONS  4   // Number of 32MB Prodos partions supported
-#define SDFAT_FILE_TYPE 1
-#define DEBUG            0      // 0:No debug information output
-                                // 1: Debug information output to USB Serial
-                                // 2: Debug information output to LOG.txt (slow)
+#define SDFAT_FILE_TYPE 1   // Only FAT16 or FAT32
+#define DEBUG           0   // 0:No debug information output
+                            // 1: Debug information output to USB Serial
+
 #if DEBUG == 1
 #define LOG(XX)     Serial.print(XX)
 #define LOGHEX(XX)  Serial.print(XX, HEX)
@@ -72,13 +78,6 @@
 #define LOGN(XX)    Serial.println(XX)
 #define LOGHEXN(XX) Serial.println(XX, HEX)
 #define LOGDECn(XX) Serial.println(XX, DEC)
-#elif DEBUG == 2
-#define LOG(XX)     LOG_FILE.println(XX); LOG_FILE.sync();
-#define LOGHEX(XX)  LOG_FILE.println(XX, HEX); LOG_FILE.sync();
-#define LOGDEC(XX)  LOG_FILE.println(XX, DEC); LOG_FILE.sync();
-#define LOGN(XX)    LOG_FILE.println(XX); LOG_FILE.sync();
-#define LOGHEXN(XX) LOG_FILE.println(XX, HEX); LOG_FILE.sync();
-#define LOGDECN(XX) LOG_FILE.println(XX, DEC); LOG_FILE.sync();
 #else
 #define LOG(XX)     //Serial.print(XX)
 #define LOGHEX(XX)  //Serial.print(XX, HEX)
@@ -102,6 +101,7 @@ void encode_extended_status_reply_packet (device d);
 void print_packet (unsigned char* data, int bytes);
 bool open_image( device &d, String filename);
 void encode_status_dib_reply_packet (device d);
+int freeMemory();
 int partition;
 bool is_valid_image(File imageFile);
 
@@ -180,7 +180,7 @@ void setup() {
   #if DEBUG
   Serial.begin(230400);
   #endif
-  LOG(F("\r\nSmartportSD v1.15\r\n"));
+  LOG(F("\r\nSmartportSD v1.xx\r\n"));
 
   for(unsigned char i=0; i<4; i++){
     pinMode(partition_led_pins[i], OUTPUT);
@@ -195,7 +195,7 @@ void setup() {
   digitalWrite(partition_led_pins[initPartition], HIGH);
 
   pinMode(ejectPin, INPUT);
-  print_hd_info(); //bad! something that prints things shouldn't do essential setup
+  print_hd_info();
 
   LOG(F("\r\nFree memory before opening images: "));
   LOG(freeMemory());
@@ -214,8 +214,7 @@ void setup() {
     LOG(i);
     LOG(F(": "));
     LOGDEC(freeMemory());
-  }  
-
+  }
 }
 
 //*****************************************************************************
@@ -1455,7 +1454,8 @@ int packet_length (void)
 void print_hd_info(void)
 {
   LOG("\r\nCard init");
-  if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)){
+  // Note SPI_FULL_SPEED makes no difference, SD access is not the bottleneck
+  if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)) {
     LOG(F("\r\nError init card"));
     led_err();
   } else {
@@ -1464,7 +1464,6 @@ void print_hd_info(void)
     digitalWrite(statusledPin, LOW);
     delay(100);
   }
- 
 }
 
 //*****************************************************************************
@@ -1477,7 +1476,7 @@ void print_hd_info(void)
 //*****************************************************************************
 int rotate_boot (void)
 {
-    int i;
+  int i;
 
   for(i = 0; i < NUM_PARTITIONS; i++){
     LOG(F("\r\nInit partition was: "));
@@ -1503,7 +1502,7 @@ int rotate_boot (void)
   digitalWrite(statusledPin, HIGH);
   LOG(F("\r\nChanging boot partition to: "));
   LOGDEC(initPartition);
- while (1){
+  while (1){
    for (i=0;i<(initPartition+1);i++) {
      digitalWrite(statusledPin,HIGH);
      digitalWrite(partition_led_pins[initPartition], HIGH);
