@@ -48,6 +48,7 @@
 //
 //*****************************************************************************
 
+#include <Arduino.h> // For Platform.IO
 #include "SdFat.h"
 #include <avr/eeprom.h>
 #include <avr/io.h>
@@ -93,7 +94,14 @@ uint8_t  decode_data_packet (void);                   //decode smartport 512 byt
 void encode_write_status_packet(unsigned char source, unsigned char status);
 void encode_init_reply_packet (unsigned char source, unsigned char status);
 void encode_status_reply_packet (struct device d);
+void mcuInit(void);
+int rotate_boot (void);
 int  packet_length (void);
+void led_err(void);
+void encode_extended_status_reply_packet (device d);
+void print_packet (unsigned char* data, int bytes);
+bool open_image( device &d, String filename);
+void encode_status_dib_reply_packet (device d);
 int partition;
 bool is_valid_image(File imageFile);
 
@@ -111,7 +119,7 @@ uint8_t initPartition;
 struct device{
   File sdf;
   unsigned char device_id;              //to hold assigned device id's for the partitions
-  uint16_t long blocks;                 //how many 512-byte blocks this image has
+  uint16_t blocks;                 //how many 512-byte blocks this image has
 };
 
 unsigned int partition_led_pins[4] = {14, 15, 16, 8};
@@ -228,8 +236,6 @@ void loop() {
 
   int number_partitions_initialised = 1;
   int noid = 0;
-  int count;
-  int ui_command;
   bool sdstato;
   unsigned char source, status, phases, status_code;
   //LOG(F("\r\nloop"));
@@ -931,7 +937,6 @@ void encode_write_status_packet(unsigned char source, unsigned char status)
   packet_buffer[2] = 0xcf;
   packet_buffer[3] = 0xf3;
   packet_buffer[4] = 0xfc;
-    int i;
   packet_buffer[5] = 0xff;
 
   packet_buffer[6] = 0xc3;  //PBEGIN - start byte
@@ -1449,11 +1454,7 @@ int packet_length (void)
 //*****************************************************************************
 void print_hd_info(void)
 {
-  int i = 0;
-  //LOG("\r\nCard init");
-  // use uppercase in hex and use 0X base prefix
-
-
+  LOG("\r\nCard init");
   if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)){
     LOG(F("\r\nError init card"));
     led_err();
@@ -1528,19 +1529,15 @@ int rotate_boot (void)
 
 void led_err(void)
 {
-  int i = 0;
   interrupts();
   LOG(F("\r\nError!"));
   pinMode(statusledPin, OUTPUT);
 
-  for (i = 0; i < 5; i++) {
+  for (int i = 0; i < 5; i++) {
     digitalWrite(statusledPin, HIGH);
-    delay(1500);
+    delay(250);
     digitalWrite(statusledPin, LOW);
-    delay(100);
-    digitalWrite(statusledPin, HIGH);
-    delay(1500);
-    digitalWrite(statusledPin, HIGH);
+    delay(250);
   }
 }
 
@@ -1668,7 +1665,7 @@ int freeMemory() {
 // TODO: Allow image files with headers, too
 // TODO: Respect read-only bit in header
 
-bool open_image( device &d, String filename ){
+bool open_image( device &d, String filename ) {
   d.sdf = sdcard.open(filename, O_RDWR);
   
   LOG(F("\r\nTesting file "));
