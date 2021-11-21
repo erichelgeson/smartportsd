@@ -68,6 +68,8 @@
 #define PIN_ACK     5       // Define the PIN number to ACK
 #define NUM_PARTITIONS  4   // Number of 32MB Prodos partions supported
 #define SDFAT_FILE_TYPE 1   // Only FAT16 or FAT32
+#define MAX_FILE_PATH  32   // Maximum file name length
+#define PART_ID_POS     4   // Position of partition id in filename
 #define DEBUG           0   // 0:No debug information output
                             // 1: Debug information output to USB Serial
 
@@ -77,7 +79,7 @@
 #define LOGDEC(XX)  Serial.print(XX, DEC)
 #define LOGN(XX)    Serial.println(XX)
 #define LOGHEXN(XX) Serial.println(XX, HEX)
-#define LOGDECn(XX) Serial.println(XX, DEC)
+#define LOGDECN(XX) Serial.println(XX, DEC)
 #else
 #define LOG(XX)     //Serial.print(XX)
 #define LOGHEX(XX)  //Serial.print(XX, HEX)
@@ -180,7 +182,7 @@ void setup() {
   #if DEBUG
   Serial.begin(230400);
   #endif
-  LOG(F("\r\nSmartportSD v1.xx\r\n"));
+  LOGN(F("SmartportSD v1.xx"));
 
   for(unsigned char i=0; i<4; i++){
     pinMode(partition_led_pins[i], OUTPUT);
@@ -190,31 +192,44 @@ void setup() {
   initPartition = eeprom_read_byte(0);
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
-  LOG(F("\r\nBoot partition: "));
-  LOGDEC(initPartition);
+  LOG(F("Boot partition: "));
+  LOGDECN(initPartition);
   digitalWrite(partition_led_pins[initPartition], HIGH);
 
   pinMode(ejectPin, INPUT);
   print_hd_info();
 
-  LOG(F("\r\nFree memory before opening images: "));
-  LOG(freeMemory());
+  // There is some issue with calling freeMemroy and Serial debugging stopping.
+  LOG(F("Free mem: "));
+  LOGN(freeMemory());
 
-  String part = "PART";
+  /* Save some memory, but wont allow you to name your images. */
+   String part = "PART";
+   open_image(devices[0], (part+(0+1)+".PO") );
+   open_image(devices[1], (part+(1+1)+".PO") );
+   open_image(devices[2], (part+(2+1)+".PO") );
+   open_image(devices[3], (part+(3+1)+".PO") );
   
-  for(unsigned char i=0; i<NUM_PARTITIONS; i++){
-    //TODO: get file names from EEPROM
-    open_image(devices[i], (part+(i+1)+".PO") );
-    if(!devices[i].sdf.isOpen()){
-      LOG(F("\r\nImage "));
-      LOGDEC(i);
-      LOG(F(" open error!"));
+  /* Seems to run out of memory with long file names, needs some optimization.
+  SdFile file;
+  File root = sdcard.open("/");
+  while (1) {
+    char name[MAX_FILE_PATH+1];
+
+    if (!file.openNext(&root, O_READ)) {
+      file.getName(name, MAX_FILE_PATH);
+      break;
+    } 
+    file.getName(name, MAX_FILE_PATH);
+    file.close();
+    String file_name = String(name);
+    if(file_name.substring(0, 4).equalsIgnoreCase("part")) {
+      int tmp_lun = name[PART_ID_POS] - '0';
+      LOGDECN(tmp_lun - 1);
+      open_image(devices[tmp_lun - 1], file_name);
     }
-    LOG(F("\r\nFree memory after opening image "));
-    LOG(i);
-    LOG(F(": "));
-    LOGDEC(freeMemory());
-  }
+  }*/
+  // LOG(freeMemory());
 }
 
 //*****************************************************************************
@@ -222,13 +237,13 @@ void setup() {
 // Parameters: none
 // Returns: 0
 //
-// Description: Main function for Apple //c Smartport Compact Flash adpater
+// Description: Main function for Apple //c SmartportSD adpater
 //*****************************************************************************
 
 
 void loop() {
-
-  // put your main code here, to run repeatedly:
+  LOGN(F("IN main loop"));
+  // LOGN(freeMemory());
 
   unsigned long int block_num;
   unsigned char LBH, LBL, LBN, LBT, LBX;
@@ -237,7 +252,6 @@ void loop() {
   int noid = 0;
   bool sdstato;
   unsigned char source, status, phases, status_code;
-  //LOG(F("\r\nloop"));
 
   DDRD = 0x00;
 
@@ -1453,16 +1467,11 @@ int packet_length (void)
 //*****************************************************************************
 void print_hd_info(void)
 {
-  LOG("\r\nCard init");
+  LOGN("Card init");
   // Note SPI_FULL_SPEED makes no difference, SD access is not the bottleneck
   if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)) {
-    LOG(F("\r\nError init card"));
+    LOGN(F("Error init card"));
     led_err();
-  } else {
-    digitalWrite(statusledPin, HIGH);
-    delay(100);
-    digitalWrite(statusledPin, LOW);
-    delay(100);
   }
 }
 
@@ -1665,23 +1674,20 @@ int freeMemory() {
 // TODO: Respect read-only bit in header
 
 bool open_image( device &d, String filename ) {
+  LOGN(filename);
   d.sdf = sdcard.open(filename, O_RDWR);
-  
-  LOG(F("\r\nTesting file "));
-  d.sdf.printName();
   if(!d.sdf.isOpen()||!d.sdf.isFile()){
-    LOG(F("\r\nFile must exist, be open and be a regular "));
-    LOG(F("file before checking for valid image type!"));
+    LOGN(F(" - File does not exist."));
     return false;
   }
 
   if(d.sdf.size() != (d.sdf.size()>>9)<<9||d.sdf.size()==0){
-    LOG(F("\r\nFile must be an unadorned ProDOS order image with no header!"));
-    LOG(F("\r\nThis means its size must be an exact multiple of 512!"));
+    LOGN(F(" - File must be an unadorned ProDOS order image with no header!"));
+    LOGN(F(" - This means its size must be an exact multiple of 512!"));
     return false;
   }
 
-  LOG(F("\r\nFile good!"));
+  LOGN(F(" - File good!"));
   d.blocks = d.sdf.size() >> 9;
 
   return true;
