@@ -56,16 +56,40 @@
 #include <avr/pgmspace.h>
 
 #define PORT_REQ    PORTD   // Define the PORT to REQ
-#define PIN_REQ     2     // Define the PIN number to REQ
+#define PIN_REQ     2       // Define the PIN number to REQ
 #define PORT_ACK    PORTC   // Define the PORT to ACK
-#define PIN_ACK     5     // Define the PIN number to ACK
-
-#define NUM_PARTITIONS  4          // Number of 32MB Prodos partions supported
-
+#define PIN_ACK     5       // Define the PIN number to ACK
+#define NUM_PARTITIONS  4   // Number of 32MB Prodos partions supported
+#define SDFAT_FILE_TYPE 1
+#define DEBUG            0      // 0:No debug information output
+                                // 1: Debug information output to USB Serial
+                                // 2: Debug information output to LOG.txt (slow)
+#if DEBUG == 1
+#define LOG(XX)     Serial.print(XX)
+#define LOGHEX(XX)  Serial.print(XX, HEX)
+#define LOGDEC(XX)  Serial.print(XX, DEC)
+#define LOGN(XX)    Serial.println(XX)
+#define LOGHEXN(XX) Serial.println(XX, HEX)
+#define LOGDECn(XX) Serial.println(XX, DEC)
+#elif DEBUG == 2
+#define LOG(XX)     LOG_FILE.println(XX); LOG_FILE.sync();
+#define LOGHEX(XX)  LOG_FILE.println(XX, HEX); LOG_FILE.sync();
+#define LOGDEC(XX)  LOG_FILE.println(XX, DEC); LOG_FILE.sync();
+#define LOGN(XX)    LOG_FILE.println(XX); LOG_FILE.sync();
+#define LOGHEXN(XX) LOG_FILE.println(XX, HEX); LOG_FILE.sync();
+#define LOGDECN(XX) LOG_FILE.println(XX, DEC); LOG_FILE.sync();
+#else
+#define LOG(XX)     //Serial.print(XX)
+#define LOGHEX(XX)  //Serial.print(XX, HEX)
+#define LOGDEC(XX)  //Serial.print(XX, DEC)
+#define LOGN(XX)    //Serial.println(XX)
+#define LOGHEXN(XX) //Serial.println(XX, HEX)
+#define LOGDECN(XX) //Serial.println(XX, DEC)
+#endif
 
 void print_hd_info(void);
 void encode_data_packet (unsigned char source);   //encode smartport 512 byte data packet
-int  decode_data_packet (void);                   //decode smartport 512 byte data packet
+uint8_t  decode_data_packet (void);                   //decode smartport 512 byte data packet
 void encode_write_status_packet(unsigned char source, unsigned char status);
 void encode_init_reply_packet (unsigned char source, unsigned char status);
 void encode_status_reply_packet (struct device d);
@@ -77,21 +101,17 @@ extern "C" unsigned char ReceivePacket(unsigned char*); //Receive smartport pack
 extern "C" unsigned char SendPacket(unsigned char*);    //send smartport packet assembler function
 
 //unsigned char packet_buffer[768];   //smartport packet buffer
-unsigned char packet_buffer[605];   //smartport packet buffer
+unsigned char packet_buffer[604];     //smartport packet buffer
 //unsigned char sector_buffer[512];   //ata sector data buffer
 unsigned char status, packet_byte;
-int count;
-int initPartition;
+uint16_t count;
+uint8_t initPartition;
 
 // We need to remember several things about a device, not just its ID
 struct device{
   File sdf;
   unsigned char device_id;              //to hold assigned device id's for the partitions
-  unsigned long blocks;                 //how many 512-byte blocks this image has
-  unsigned int header_offset;           //Some image files have headers, skip this many bytes to avoid them
-  //bool online;                          //Whether this image is currently available
-                                          //No longer used, user devices[...].sdf.isOpen() instead
-  bool writeable;
+  uint16_t long blocks;                 //how many 512-byte blocks this image has
 };
 
 unsigned int partition_led_pins[4] = {14, 15, 16, 8};
@@ -149,8 +169,10 @@ SdFat sdcard;
 
 void setup() {
   mcuInit();
+  #if DEBUG
   Serial.begin(230400);
-  Serial.print(F("\r\nSmartportSD v1.15\r\n"));
+  #endif
+  LOG(F("\r\nSmartportSD v1.15\r\n"));
 
   for(unsigned char i=0; i<4; i++){
     pinMode(partition_led_pins[i], OUTPUT);
@@ -160,15 +182,15 @@ void setup() {
   initPartition = eeprom_read_byte(0);
   if (initPartition == 0xFF) initPartition = 0;
   initPartition = (initPartition % 4);
-  Serial.print(F("\r\nBoot partition: "));
-  Serial.print(initPartition, DEC);
+  LOG(F("\r\nBoot partition: "));
+  LOGDEC(initPartition);
   digitalWrite(partition_led_pins[initPartition], HIGH);
 
   pinMode(ejectPin, INPUT);
   print_hd_info(); //bad! something that prints things shouldn't do essential setup
 
-  Serial.print(F("\r\nFree memory before opening images: "));
-  Serial.print(freeMemory());
+  LOG(F("\r\nFree memory before opening images: "));
+  LOG(freeMemory());
 
   String part = "PART";
   
@@ -176,14 +198,14 @@ void setup() {
     //TODO: get file names from EEPROM
     open_image(devices[i], (part+(i+1)+".PO") );
     if(!devices[i].sdf.isOpen()){
-      Serial.print(F("\r\nImage "));
-      Serial.print(i, DEC);
-      Serial.print(F(" open error!"));
+      LOG(F("\r\nImage "));
+      LOGDEC(i);
+      LOG(F(" open error!"));
     }
-    Serial.print(F("\r\nFree memory after opening image "));
-    Serial.print(i);
-    Serial.print(F(": "));
-    Serial.print(freeMemory(), DEC);
+    LOG(F("\r\nFree memory after opening image "));
+    LOG(i);
+    LOG(F(": "));
+    LOGDEC(freeMemory());
   }  
 
 }
@@ -210,7 +232,7 @@ void loop() {
   int ui_command;
   bool sdstato;
   unsigned char source, status, phases, status_code;
-  //Serial.print(F("\r\nloop"));
+  //LOG(F("\r\nloop"));
 
   DDRD = 0x00;
 
@@ -228,16 +250,16 @@ void loop() {
     // read phase lines to check for smartport reset or enable
     phases = (PIND & 0x3c) >> 2;
 
-    //Serial.print(phases);
+    //LOG(phases);
     switch (phases) {
 
       // phase lines for smartport bus reset
       // ph3=0 ph2=1 ph1=0 ph0=1
 
       case 0x05:
-        Serial.print(F("\r\nReset\r\n"));
+        LOG(F("\r\nReset\r\n"));
 
-        //Serial.print(number_partitions_initialised);
+        //LOG(number_partitions_initialised);
         // monitor phase lines for reset to clear
         while ((PIND & 0x3c) >> 2 == 0x05);
         number_partitions_initialised = 1; //reset number of partitions init'd
@@ -252,7 +274,7 @@ void loop() {
       case 0x0b:
       case 0x0e:
       case 0x0f:
-        //Serial.print(("E ")); //this is timing sensitive, so can't print to much here as it takes to long
+        //LOG(("E ")); //this is timing sensitive, so can't print to much here as it takes to long
         noInterrupts();
         DDRC = 0xFF;   //set ack to output, sp bus is enabled
         if ((status = ReceivePacket( (unsigned char*) packet_buffer))) {
@@ -261,13 +283,13 @@ void loop() {
         }
         interrupts();
 
-        //Serial.print(F("\r\nHere's our packet!"));
+        //LOG(F("\r\nHere's our packet!"));
         //print_packet ((unsigned char*) packet_buffer, packet_length());
 
         // lets check if the pkt is for us
         if (packet_buffer[14] != 0x85)  // if its an init pkt, then assume its for us and continue on
         {
-          //Serial.print(F("\r\nNot 0x85!"));
+          //LOG(F("\r\nNot 0x85!"));
           
           // else check if its our one of our id's
           for  (partition = 0; partition < NUM_PARTITIONS; partition++)
@@ -278,7 +300,7 @@ void loop() {
           if (noid == NUM_PARTITIONS)  //not one of our id's
           {
             delay(100);
-            Serial.print(F("\r\nNot our ID!"));
+            LOG(F("\r\nNot our ID!"));
             //printf_P(PSTR("\r\nnot ours\r\n") );
             DDRC = 0xDF; //set ack to input, so lets not interfere
             PORTC &= ~(_BV(5));   //set ack low, for next time its an output
@@ -294,23 +316,23 @@ void loop() {
               case 0x83:  //is a format cmd
               case 0x81:  //is a readblock cmd
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(F("A ")) );
+                //LOG(F("A ")) );
                 while (PINC & 0x20);      //wait till low
-                //Serial.print(F(("a ")) );
+                //LOG(F(("a ")) );
                 while (!(PINC & 0x20));  //wait till high
-                //Serial.print(F(("A\r\n")) );
+                //LOG(F(("A\r\n")) );
                 break;
               case 0x82:  //is a writeblock cmd
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(F(("W ")) );
+                //LOG(F(("W ")) );
                 while (PINC & 0x20);      //wait till low
-                //Serial.print(F(("w ")) );
+                //LOG(F(("w ")) );
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(F("W\r\n")) );
+                //LOG(F("W\r\n")) );
                 while (PINC & 0x20);      //wait till low
-                //Serial.print(F(("w ")) );
+                //LOG(F(("w ")) );
                 while (!(PINC & 0x20));   //wait till high
-                //Serial.print(F("W\r\n") );
+                //LOG(F("W\r\n") );
                 break;
             }
             break;  //not one of ours
@@ -318,21 +340,21 @@ void loop() {
         }
 
         //else it is ours, we need to handshake the packet
-        //Serial.print(F("\r\nBW"));
+        //LOG(F("\r\nBW"));
         PORTC &= ~(_BV(5));   //set ack low
         while (PIND & 0x04);   //wait for req to go low
-        //Serial.println(F("\r\nAW"));
+        //LOGN(F("\r\nAW"));
         //Not safe to assume it's a normal command packet, GSOS may throw
         //us several extended packets here and then crash 
         //Refuse an extended packet
         source = packet_buffer[6];
         //Check if its one of ours and an extended packet
-        //Serial.println(packet_buffer[8], HEX);
-        //Serial.println(packet_buffer[14], HEX);
+        LOGHEX(packet_buffer[8]);
+        LOGHEX(packet_buffer[14]);
         /*
         if(is_ours(source) && packet_buffer[8] >= 0xC0 && packet_buffer[14] >= 0xC0) { 
-          Serial.print(F("\r\nRefusing extended packet! "));
-          Serial.print(source, HEX);
+          LOG(F("\r\nRefusing extended packet! "));
+          LOGHEX(source);
           
           delay(50);
           encode_error_reply_packet(source);
@@ -341,19 +363,19 @@ void loop() {
           status = SendPacket( (unsigned char*) packet_buffer);
           DDRD = 0x00; //set rd back to input so back to tristate
           interrupts();
-          Serial.print(F("\r\nRefused packet!"));
+          LOG(F("\r\nRefused packet!"));
           delay(100);
           break;
         }*/
         
           
         //assume its a cmd packet, cmd code is in byte 14
-        //Serial.print(F("\r\nCMD:"));
-        //Serial.print(packet_buffer[14],HEX);
+        //LOG(F("\r\nCMD:"));
+        //LOGHEX(packet_buffer[14]);
         //print_packet ((unsigned char*) packet_buffer,packet_length());
         if(packet_buffer[14]>=0xC0){
-           // Serial.print(F("\r\nExtended packet!"));
-           // Serial.print(F("\r\nHere's our packet!"));
+           // LOG(F("\r\nExtended packet!"));
+           // LOG(F("\r\nHere's our packet!"));
            // print_packet ((unsigned char*) packet_buffer, packet_length());
            // delay(50);
         }
@@ -368,29 +390,29 @@ void loop() {
                 && devices[(partition + initPartition) % NUM_PARTITIONS].sdf.isOpen() ) {  //yes it is, and it's online, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 status_code = (packet_buffer[19] & 0x7f); // | (((unsigned short)packet_buffer[16] << 3) & 0x80);
-                //Serial.print(F("\r\nStatus code: "));
-                //Serial.print(status_code);
+                //LOG(F("\r\nStatus code: "));
+                //LOG(status_code);
                 //print_packet ((unsigned char*) packet_buffer, packet_length());
-                //Serial.print(F("\r\nHere's the decoded status packet because frig doing it by hand!"));
+                //LOG(F("\r\nHere's the decoded status packet because frig doing it by hand!"));
                 //decode_data_packet();
                 //print_packet((unsigned char*) packet_buffer, 9); //Standard SmartPort command is 9 bytes
                 //if (status_code |= 0x00) { // TEST
-                //  Serial.print(F("\r\nStatus not zero!! ********"));
+                //  LOG(F("\r\nStatus not zero!! ********"));
                 //  print_packet ((unsigned char*) packet_buffer,packet_length());}
                 if (status_code == 0x03) { // if statcode=3, then status with device info block
-                  Serial.print(F("\r\n******** Sending DIB! ********"));
+                  LOG(F("\r\n******** Sending DIB! ********"));
                   encode_status_dib_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);
                   //print_packet ((unsigned char*) packet_buffer,packet_length());
                   delay(50);
                 } else {  // else just return device status
                   /*
-                  Serial.print(F("\r\n-------- Sending status! --------"));
-                  Serial.print(F("\r\nSource: "));
-                  Serial.print(source,HEX);
-                  Serial.print(F(" Partition ID: "));
-                  Serial.print(devices[(partition + initPartition) % NUM_PARTITIONS].device_id, HEX);
-                  Serial.print(F(" Status code: "));
-                  Serial.print(status_code, HEX);
+                  LOG(F("\r\n-------- Sending status! --------"));
+                  LOG(F("\r\nSource: "));
+                  LOGHEX(source);
+                  LOG(F(" Partition ID: "));
+                  LOGHEX(devices[(partition + initPartition) % NUM_PARTITIONS].device_id);
+                  LOG(F(" Status code: "));
+                  LOGHEX(status_code);
                   */
                   encode_status_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);        
                 }
@@ -408,36 +430,36 @@ void loop() {
 
 
           /*case 0xC1:
-            Serial.print(F("\r\nExtended read! Not implemented!"));
+            LOG(F("\r\nExtended read! Not implemented!"));
             break;*/
           case 0xC2:
-            Serial.print(F("\r\nExtended write! Not implemented!"));
+            LOG(F("\r\nExtended write! Not implemented!"));
             break;
           case 0xC3:
-            Serial.print(F("\r\nExtended format! Not implemented!"));
+            LOG(F("\r\nExtended format! Not implemented!"));
             break;
           case 0xC5:
-            Serial.print(F("\r\nExtended init! Not implemented!"));
+            LOG(F("\r\nExtended init! Not implemented!"));
             break;
 
           case 0xC0:  //Extended status cmd
             digitalWrite(statusledPin, HIGH);
             source = packet_buffer[6];
-            //Serial.println(source, HEX);
+            LOGHEXN(source);
             for (partition = 0; partition < NUM_PARTITIONS; partition++) { //Check if its one of ours
               if (devices[(partition + initPartition) % NUM_PARTITIONS].device_id == source) {  //yes it is, then reply
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 status_code = (packet_buffer[21] & 0x7f);
-                 Serial.print(F("\r\nExtended Status CMD:"));
-                 Serial.print(status_code, HEX);
+                 LOG(F("\r\nExtended Status CMD:"));
+                 LOG(status_code);
                  print_packet ((unsigned char*) packet_buffer,packet_length());
                  if (status_code == 0x03) { // if statcode=3, then status with device info block
-                  Serial.println(F("Extended status DIB!"));
+                  LOGN(F("Extended status DIB!"));
                 } else {  // else just return device status
-                  //Serial.print(F("\r\nExtended status non-DIB! Part: "));
-                  //Serial.print(partition, HEX);
-                  //Serial.print(F(" code: "));
-                  //Serial.print(status_code, HEX);
+                  //LOG(F("\r\nExtended status non-DIB! Part: "));
+                  //LOGHEX(partition);
+                  //LOG(F(" code: "));
+                  //LOGHEX(status_code);
                   //delay(50);
                   encode_extended_status_reply_packet(devices[(partition + initPartition) % NUM_PARTITIONS]);        
                 }
@@ -448,20 +470,20 @@ void loop() {
                 interrupts();
                 //printf_P(PSTR("\r\nSent Packet Data\r\n") );
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
-                //Serial.print(F("\r\nStatus CMD"));
+                //LOG(F("\r\nStatus CMD"));
                 digitalWrite(statusledPin, LOW);
               }
             }
-            //Serial.print(F("\r\nHere's our reply!"));
+            //LOG(F("\r\nHere's our reply!"));
             //print_packet ((unsigned char*) packet_buffer, packet_length());
             //*/
             break;  
 
           case 0xC1:  //extended readblock cmd
-            /*Serial.print(F("\r\nExtended read!"));
+            /*LOG(F("\r\nExtended read!"));
             source = packet_buffer[6];
-            //Serial.print("\r\nDrive ");
-            //Serial.print(source,HEX);
+            //LOG("\r\nDrive ");
+            //LOGHEX(source);
             LBH = packet_buffer[16]; //high order bits
             LBX = packet_buffer[21]; //block number SUPER high! whee
             LBT = packet_buffer[20]; //block number high
@@ -478,36 +500,36 @@ void loop() {
                 block_num = block_num + (((LBL & 0x7f) | (((unsigned short)LBH << 4) & 0x80)) << 8);
                 block_num = block_num + (((LBT & 0x7f) | (((unsigned short)LBH << 5) & 0x80)) << 16);
                 block_num = block_num + (((LBX & 0x7f) | (((unsigned short)LBH << 6) & 0x80)) << 24);
-                Serial.print(F("\r\n Extended read block #0x"));
-                Serial.print(block_num, HEX);
+                LOG(F("\r\n Extended read block #0x"));
+                LOGHEX(block_num);
                 // partition number indicates which 32mb block we access on the CF
                 // block_num = block_num + (((partition + initPartition) % 4) * 65536);
 
                 digitalWrite(statusledPin, HIGH);
-                Serial.print(F("\r\nID: "));
-                Serial.print(source);
-                Serial.print(F("Read Block: "));
-                Serial.print(block_num);
+                LOG(F("\r\nID: "));
+                LOG(source);
+                LOG(F("Read Block: "));
+                LOG(block_num);
 
                 if (!devices[(partition + initPartition) % NUM_PARTITIONS].sdf.seekSet(block_num*512)){
-                  Serial.print(F("\r\nRead err!"));
+                  LOG(F("\r\nRead err!"));
                 }
                 
                 sdstato = devices[(partition + initPartition) % NUM_PARTITIONS].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
-                  Serial.print(F("\r\nRead err!"));
+                  LOG(F("\r\nRead err!"));
                 }
                 encode_extended_data_packet(source);
-                //Serial.print(F("\r\nPrepared data packet before Sending\r\n") );
+                //LOG(F("\r\nPrepared data packet before Sending\r\n") );
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                //if (status == 1)Serial.print(F("\r\nSent err."));
+                //if (status == 1)LOG(F("\r\nSent err."));
                 digitalWrite(statusledPin, LOW);
 
-                //Serial.print(status);
+                //LOG(status);
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
                 //print_packet ((unsigned char*) sector_buffer,15);
               }
@@ -518,8 +540,8 @@ void loop() {
           case 0x81:  //is a readblock cmd
 
             source = packet_buffer[6];
-            //Serial.print("\r\nDrive ");
-            //Serial.print(source,HEX);
+            //LOG("\r\nDrive ");
+            //LOGHEX(source);
             LBH = packet_buffer[16]; //high order bits
             LBT = packet_buffer[21]; //block number high
             LBL = packet_buffer[20]; //block number middle
@@ -534,45 +556,45 @@ void loop() {
                 //Added (unsigned short) cast to ensure calculated block is not underflowing.
                 block_num = block_num + (((LBL & 0x7f) | (((unsigned short)LBH << 4) & 0x80)) << 8);
                 block_num = block_num + (((LBT & 0x7f) | (((unsigned short)LBH << 5) & 0x80)) << 16);
-                //Serial.print(F("\r\nRead block #0x"));
-                //Serial.print(block_num, HEX);
+                //LOG(F("\r\nRead block #0x"));
+                //LOGHEX(block_num);
                 // partition number indicates which 32mb block we access on the CF
                 // block_num = block_num + (((partition + initPartition) % 4) * 65536);
 
                 digitalWrite(statusledPin, HIGH);
-                /*Serial.print(F("\r\nID: "));
-                Serial.print(source);
-                Serial.print(F("Read Block: "));
-                Serial.print(block_num);*/
+                /*LOG(F("\r\nID: "));
+                LOG(source);
+                LOG(F("Read Block: "));
+                LOG(block_num);*/
 
                 if (!devices[(partition + initPartition) % NUM_PARTITIONS].sdf.seekSet(block_num*512)){
-                  Serial.print(F("\r\nRead seek err!"));
-                  Serial.print(F("\r\nPartition #"));
-                  Serial.print((partition + initPartition) % NUM_PARTITIONS);
-                  Serial.print(F(" block #"));
-                  Serial.print(block_num);
+                  LOG(F("\r\nRead seek err!"));
+                  LOG(F("\r\nPartition #"));
+                  LOG((partition + initPartition) % NUM_PARTITIONS);
+                  LOG(F(" block #"));
+                  LOG(block_num);
                   if(devices[(partition + initPartition) % NUM_PARTITIONS].sdf.isOpen()){
-                    Serial.print(F("\r\nPartition file is open!"));
+                    LOG(F("\r\nPartition file is open!"));
                   }else{
-                    Serial.print(F("\r\nPartition file is closed!"));
+                    LOG(F("\r\nPartition file is closed!"));
                   }
                 }
                 
                 sdstato = devices[(partition + initPartition) % NUM_PARTITIONS].sdf.read((unsigned char*) packet_buffer, 512);    //Reading block from SD Card
                 if (!sdstato) {
-                  Serial.print(F("\r\nRead err!"));
+                  LOG(F("\r\nRead err!"));
                 }
                 encode_data_packet(source);
-                //Serial.print(F("\r\nPrepared data packet before Sending\r\n") );
+                //LOG(F("\r\nPrepared data packet before Sending\r\n") );
                 noInterrupts();
                 DDRD = 0x40; //set rd as output
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                //if (status == 1)Serial.print(F("\r\nSent err."));
+                //if (status == 1)LOG(F("\r\nSent err."));
                 digitalWrite(statusledPin, LOW);
 
-                //Serial.print(status);
+                //LOG(status);
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
                 //print_packet ((unsigned char*) sector_buffer,15);
               }
@@ -603,18 +625,18 @@ void loop() {
                 status = decode_data_packet();
                 if (status == 0) { //ok
                   //write block to CF card
-                  //Serial.print(F("\r\nWrite Bl. n.r: "));
-                  //Serial.print(block_num);
+                  //LOG(F("\r\nWrite Bl. n.r: "));
+                  //LOG(block_num);
                   digitalWrite(statusledPin, HIGH);
                   // TODO: add file object lookup
                   if (!devices[(partition + initPartition) % NUM_PARTITIONS].sdf.seekSet(block_num*512)){
-                    Serial.print(F("\r\nWrite seek err!"));
+                    LOG(F("\r\nWrite seek err!"));
                   }
                   sdstato = devices[(partition + initPartition) % NUM_PARTITIONS].sdf.write((unsigned char*) packet_buffer, 512);   //Write block to SD Card
                   if (!sdstato) {
-                    Serial.print(F("\r\nWrite err!"));
-                    //Serial.print(F(" Block n.:"));
-                    //Serial.print(block_num);
+                    LOG(F("\r\nWrite err!"));
+                    //LOG(F(" Block n.:"));
+                    //LOG(block_num);
                     status = 6;
                   }
                 }
@@ -625,7 +647,7 @@ void loop() {
                 status = SendPacket( (unsigned char*) packet_buffer);
                 DDRD = 0x00; //set rd back to input so back to tristate
                 interrupts();
-                //Serial.print(F("\r\nSent status Packet Data\r\n") );
+                //LOG(F("\r\nSent status Packet Data\r\n") );
                 //print_packet ((unsigned char*) sector_buffer,512);
 
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
@@ -645,7 +667,7 @@ void loop() {
                 status = SendPacket( (unsigned char*) packet_buffer);
                 interrupts();
                 DDRD = 0x00; //set rd back to input so back to tristate
-                //Serial.print(F("\r\nFormattato!!!\r\n") );
+                //LOG(F("\r\nFormattato!!!\r\n") );
                 //print_packet ((unsigned char*) packet_buffer,packet_length());
               }
             }
@@ -679,8 +701,8 @@ void loop() {
 
             if (number_partitions_initialised - 1 == NUM_PARTITIONS) {
               for (partition = 0; partition < NUM_PARTITIONS; partition++) {
-                Serial.print(F("\r\nDrive: "));
-                Serial.print(devices[(partition + initPartition) % NUM_PARTITIONS].device_id, HEX);
+                LOG(F("\r\nDrive: "));
+                LOGHEX(devices[(partition + initPartition) % NUM_PARTITIONS].device_id);
               }
             }
             break;          
@@ -847,7 +869,7 @@ void encode_extended_data_packet (unsigned char source)
 // Description: decode 512 byte data packet for write block command from host
 // decodes the data from the packet_buffer IN-PLACE!
 //*****************************************************************************
-int decode_data_packet (void)
+uint8_t decode_data_packet (void)
 {
   int grpbyte, grpcount;
   unsigned char numgrps, numodd;
@@ -1195,7 +1217,7 @@ void encode_status_dib_reply_packet (device d)
     
 
  // print_packet ((unsigned char*) data,packet_length()); // debug
- // Serial.print(F("\nData loaded"));
+ // LOG(F("\nData loaded"));
 // Calculate checksum of sector bytes before we destroy them
     for (count = 0; count < 25; count++) // xor all the data bytes
     checksum = checksum ^ data[count];
@@ -1351,10 +1373,10 @@ int verify_cmdpkt_checksum(void)
   evenbits = packet_buffer[length - 3];
   pkt_checksum = oddbits | evenbits;
 
-  //  Serial.print(F("Pkt Chksum Byte:\r\n"));
-  //  Serial.print(pkt_checksum,DEC);
-  //  Serial.print(F("Calc Chksum Byte:\r\n"));
-  //  Serial.print(calc_checksum,DEC);
+  //  LOG(F("Pkt Chksum Byte:\r\n"));
+  //  LOGDEC(pkt_checksum);
+  //  LOG(F("Calc Chksum Byte:\r\n"));
+  //  LOGDEC(calc_checksum);
 
   if ( pkt_checksum == calc_checksum )
     return 1;
@@ -1376,29 +1398,29 @@ void print_packet (unsigned char* data, int bytes)
   char tbs[8];
   char xx;
 
-  Serial.print(F("\r\n"));
+  LOG(F("\r\n"));
   for (count = 0; count < bytes; count = count + 16) {
     sprintf(tbs, ("%04X: "), count);
-    Serial.print(tbs);
+    LOG(tbs);
     for (row = 0; row < 16; row++) {
       if (count + row >= bytes)
-        Serial.print(F("   "));
+        LOG(F("   "));
       else {
-        Serial.print(data[count + row], HEX);
-        Serial.print(" ");
+        LOGHEX(data[count + row]);
+        LOG(" ");
       }
     }
-    Serial.print(F("-"));
+    LOG(F("-"));
     for (row = 0; row < 16; row++) {
       if ((data[count + row] > 31) && (count + row < bytes) && (data[count + row] < 129))
       {
         xx = data[count + row];
-        Serial.print(xx);
+        LOG(xx);
       }
       else
-        Serial.print(F("."));
+        LOG(F("."));
     }
-    Serial.print(F("\r\n"));
+    LOG(F("\r\n"));
   }
 }
 
@@ -1428,12 +1450,12 @@ int packet_length (void)
 void print_hd_info(void)
 {
   int i = 0;
-  //Serial.print("\r\nCard init");
+  //LOG("\r\nCard init");
   // use uppercase in hex and use 0X base prefix
 
 
   if(!sdcard.begin(chipSelect, SPI_HALF_SPEED)){
-    Serial.print(F("\r\nError init card"));
+    LOG(F("\r\nError init card"));
     led_err();
   } else {
     digitalWrite(statusledPin, HIGH);
@@ -1457,29 +1479,29 @@ int rotate_boot (void)
     int i;
 
   for(i = 0; i < NUM_PARTITIONS; i++){
-    Serial.print(F("\r\nInit partition was: "));
-    Serial.print(initPartition, DEC);
+    LOG(F("\r\nInit partition was: "));
+    LOGDEC(initPartition);
     initPartition++;
     initPartition = initPartition % 4;
     //Find the next partition that's available 
     //and set it to be the boot partition
     if(devices[initPartition].sdf.isOpen()){
-      Serial.print(F("\r\nSelecting boot partition number "));
-      Serial.print(initPartition, DEC);
+      LOG(F("\r\nSelecting boot partition number "));
+      LOGDEC(initPartition);
       break;
     }
   }
 
   if(i == NUM_PARTITIONS){
-    Serial.print(F("\r\nNo online partitions found. Check that you have a file called PARTx.PO and try again, where x is from 1 to "));
-    Serial.print(NUM_PARTITIONS, DEC);
+    LOG(F("\r\nNo online partitions found. Check that you have a file called PARTx.PO and try again, where x is from 1 to "));
+    LOGDEC(NUM_PARTITIONS);
     initPartition = 0;
   }
 
   eeprom_write_byte(0, initPartition);
   digitalWrite(statusledPin, HIGH);
-  Serial.print(F("\r\nChanging boot partition to: "));
-  Serial.print(initPartition, DEC);
+  LOG(F("\r\nChanging boot partition to: "));
+  LOGDEC(initPartition);
  while (1){
    for (i=0;i<(initPartition+1);i++) {
      digitalWrite(statusledPin,HIGH);
@@ -1508,7 +1530,7 @@ void led_err(void)
 {
   int i = 0;
   interrupts();
-  Serial.print(F("\r\nError!"));
+  LOG(F("\r\nError!"));
   pinMode(statusledPin, OUTPUT);
 
   for (i = 0; i < 5; i++) {
@@ -1649,21 +1671,21 @@ int freeMemory() {
 bool open_image( device &d, String filename ){
   d.sdf = sdcard.open(filename, O_RDWR);
   
-  Serial.print(F("\r\nTesting file "));
+  LOG(F("\r\nTesting file "));
   d.sdf.printName();
   if(!d.sdf.isOpen()||!d.sdf.isFile()){
-    Serial.print(F("\r\nFile must exist, be open and be a regular "));
-    Serial.print(F("file before checking for valid image type!"));
+    LOG(F("\r\nFile must exist, be open and be a regular "));
+    LOG(F("file before checking for valid image type!"));
     return false;
   }
 
   if(d.sdf.size() != (d.sdf.size()>>9)<<9||d.sdf.size()==0){
-    Serial.print(F("\r\nFile must be an unadorned ProDOS order image with no header!"));
-    Serial.print(F("\r\nThis means its size must be an exact multiple of 512!"));
+    LOG(F("\r\nFile must be an unadorned ProDOS order image with no header!"));
+    LOG(F("\r\nThis means its size must be an exact multiple of 512!"));
     return false;
   }
 
-  Serial.print(F("\r\nFile good!"));
+  LOG(F("\r\nFile good!"));
   d.blocks = d.sdf.size() >> 9;
 
   return true;
