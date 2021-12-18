@@ -6,7 +6,7 @@ This is an enhancement of the [SmartportCFA/SmartportSD](http://www.users.on.net
 
 ## Get the code
 
-Use git to clone the repo and open in PlatformIO.
+Use git to clone the repo and open in [PlatformIO](https://platformio.org/platformio-ide).
 
 ## Wire up the Arduino
 
